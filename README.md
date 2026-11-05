@@ -18,9 +18,15 @@ This repo is public and holds only code. Personal data lives in the private repo
 | `words.json` | `tools/import_lingvist.py` | one entry per Lingvist card: form, stage, interval, history stats |
 | `sentences.json` | `tools/make_sentences.py` | per card: lemma, POS, gloss, 3 cloze sentences with translation + hint |
 
-### Stages
+### Scheduling (`js/srs.js`)
 
-The export only has Lingvist's state *before* each answer, so the importer computes the state after the last one: held = max(scheduled interval, real gap); first-try correct → next = held × 2.5 (1 day to 180 days), miss → 10 min. Stage by next interval: `learning` < 1 d, `young` < 7 d, `familiar` < 30 d, `known` ≥ 30 d; a single failed sighting is `new`.
+Lingvist-style learning ladder + FSRS-5 for long-term memory. Lingvist's own rules, read from the export (state per answer): a miss brings the word back after ~50 s, then each first-try correct multiplies the gap by 5 (25 s → 2 min → 10 min → 1 h → …); then a forgetting model targeting 80 % recall takes over; right at first sight → ~280 days.
+
+- **Ladder:** level 0–5, one pip per first-try correct; a miss → 0 (a long-term card that slips → 2). Retyping after a miss never counts. Steps: 30 s, 1 min, 5 min, 25 min, 2 h. Right at first sight, or right after ≥ 1 day → level 5 at once.
+- **Long term:** FSRS-5 (default parameters) updates stability S and difficulty D on every answer; next review when predicted recall drops to 90 %.
+- **Stages:** `new` (never right), `learning` (ladder), then by stability: `young` < 7 d, `familiar` < 30 d, `known` ≥ 30 d.
+- State is never stored: each card's log (`words.json` history from Lingvist + `progress.json` log from the app) is replayed, so rule changes re-schedule everything.
+- Order: learning cards whose step is due, then due reviews (most overdue first), then learning cards due within 20 min.
 
 ### Sentences
 

@@ -118,6 +118,8 @@ def main():
             "last_seen": t_last.isoformat(timespec="seconds"),
             "due": datetime.fromtimestamp(due, timezone.utc).isoformat(timespec="seconds") if due else None,
             "overdue": bool(due and due < now.timestamp()),
+            # every answer: [unix seconds, 1 = right on the first try]; the app replays this through its scheduler
+            "history": [[int(t.timestamp()), int(ok)] for (t, _), ok in zip(hist, firsts)],
         })
 
     words.sort(key=lambda w: (w["word"].lower(), w["id"]))
