@@ -1,0 +1,14 @@
+/* French Trainer parts in the HUD style (on top of css/styles/hud.css). */
+[data-style="hud"] .top h1 { font-family: var(--display); text-transform: uppercase; letter-spacing: .14em; font-size: .95rem; }
+[data-style="hud"] .counts, [data-style="hud"] .meta, [data-style="hud"] .stage-legend { font-family: var(--mono); }
+[data-style="hud"] .stage-tag { font-family: var(--mono); letter-spacing: .1em; }
+[data-style="hud"] .stage-tag::before { content: "["; } [data-style="hud"] .stage-tag::after { content: "]"; }
+[data-style="hud"] .stage-tag { border: 0; padding: 0; }
+[data-style="hud"] .hint { font-family: var(--display); letter-spacing: .04em; }
+[data-style="hud"] .gap { font-family: var(--mono); background: transparent; }
+[data-style="hud"] .gap:focus { background: var(--btn-hover); }
+[data-style="hud"] .related .chip { font-family: var(--mono); font-size: .8rem; }
+[data-style="hud"] .stage-bar { height: 8px; gap: 2px; background: transparent; }
+[data-style="hud"] .stage-bar span:nth-child(n) { min-width: 2px; }
+[data-style="hud"] dialog h2 { font-family: var(--display); text-transform: uppercase; letter-spacing: .12em; }
+[data-style="hud"] .icon-btn { border: 1px solid var(--btn-border); }
