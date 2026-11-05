@@ -1,0 +1,117 @@
+"""Generate cloze sentences for every word in ../french-data/words.json.
+
+Uses headless Claude Code (`claude -p`, the subscription; no API key needed).
+Writes ../french-data/sentences.json, keyed by card id, and is resumable: words that
+already have sentences are skipped, so re-run it after new imports.
+
+    python tools/make_sentences.py                 # all missing words
+    python tools/make_sentences.py --limit 40      # try a small batch first
+    python tools/make_sentences.py --redo cou,parmi
+
+Difficulty follows the stage: new/learning words get short, simple sentences built from
+vocabulary you already know well; familiar/known words get longer, more natural ones.
+"""
+import argparse
+import json
+import random
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+PER_WORD = 3
+BATCH = 25
+LEVEL = {
+    "new": "A2: short (6-10 words), present or passé composé, everyday context",
+    "learning": "A2: short (6-10 words), everyday context",
+    "young": "B1: 8-14 words, natural everyday or news context",
+    "familiar": "B1-B2: 10-16 words, varied tenses and contexts",
+    "known": "B2: 10-18 words, natural, idiomatic, varied contexts",
+}
+
+PROMPT = """You write French cloze sentences for a vocabulary trainer (like Lingvist).
+For each target word below, write {n} different sentences. Rules:
+- The sentence must contain the target EXACTLY as given (same spelling, accents, apostrophes, inflection), once.
+- The context must make the target the clearly best answer, given the English hint.
+- Level per word is given. Prefer these words I already know for the rest of the sentence: {known}.
+- Natural, modern French; vary topics; no names of real people.
+For each word also give: lemma, part of speech (noun/verb/adj/adv/pron/prep/conj/det/other), gender for nouns (m/f), and a short English gloss of the target as used.
+Per sentence give the full English translation and "hint": the English for the target in that sentence.
+
+Reply with JSON only, no prose, shaped:
+{{"<id>": {{"lemma": "...", "pos": "...", "gender": null, "gloss": "...",
+  "sentences": [{{"fr": "...", "en": "...", "hint": "..."}}]}}}}
+
+Words (id | target | level):
+{words}
+"""
+
+
+def data_dir():
+    return Path(__file__).resolve().parents[1].parent / "french-data"
+
+
+def ask_claude(prompt):
+    exe = shutil.which("claude") or shutil.which("claude.cmd")
+    r = subprocess.run([exe, "-p", "--output-format", "text"], input=prompt,
+                       capture_output=True, text=True, encoding="utf-8", timeout=900)
+    if r.returncode:
+        raise RuntimeError(r.stderr.strip()[:500])
+    m = re.search(r"\{.*\}", r.stdout, re.S)
+    return json.loads(m.group(0))
+
+
+def check(word, entry):
+    """Keep sentences that contain the target as a whole word."""
+    pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?![\w])", re.I)
+    entry["sentences"] = [s for s in entry.get("sentences", []) if pat.search(s.get("fr", ""))]
+    return entry
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", default=str(data_dir()))
+    ap.add_argument("--limit", type=int, default=0, help="max words this run")
+    ap.add_argument("--redo", default="", help="comma-separated words to regenerate")
+    args = ap.parse_args()
+    data = Path(args.data)
+    words = json.loads((data / "words.json").read_text(encoding="utf-8"))["words"]
+    out_path = data / "sentences.json"
+    out = json.loads(out_path.read_text(encoding="utf-8")) if out_path.exists() else {}
+    redo = {w.strip() for w in args.redo.split(",") if w.strip()}
+    for w in words:
+        if w["word"] in redo:
+            out.pop(w["id"], None)
+
+    known = [w["word"] for w in words if w["stage"] == "known" and w["first_try_rate"] >= 0.6]
+    todo = [w for w in words if len(out.get(w["id"], {}).get("sentences", [])) < 1]
+    # hardest first: they need sentences soonest
+    order = {"learning": 0, "new": 1, "young": 2, "familiar": 3, "known": 4}
+    todo.sort(key=lambda w: (order[w["stage"]], w["word"]))
+    if args.limit:
+        todo = todo[:args.limit]
+    print(f"{len(todo)} words to do, {len(out)} done")
+
+    for i in range(0, len(todo), BATCH):
+        batch = todo[i:i + BATCH]
+        lines = "\n".join(f"{w['id']} | {w['word']} | {LEVEL[w['stage']]}" for w in batch)
+        prompt = PROMPT.format(n=PER_WORD, known=", ".join(random.sample(known, min(150, len(known)))), words=lines)
+        try:
+            res = ask_claude(prompt)
+        except Exception as e:  # keep going; the next run retries these
+            print(f"batch {i // BATCH + 1}: failed ({e})")
+            continue
+        got = 0
+        for w in batch:
+            if w["id"] in res:
+                entry = check(w["word"], res[w["id"]])
+                if entry["sentences"]:
+                    entry["word"] = w["word"]
+                    out[w["id"]] = entry
+                    got += 1
+        out_path.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"batch {i // BATCH + 1}: {got}/{len(batch)} words, total {len(out)}")
+
+
+if __name__ == "__main__":
+    main()
