@@ -1,0 +1,4 @@
+# personal Lingvist export (email, password hash, IP)
+data/lingvist-raw/
+data/*.zip
+__pycache__/
