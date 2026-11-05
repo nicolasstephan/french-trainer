@@ -2,7 +2,10 @@
 
 Uses headless Claude Code (`claude -p`, the subscription; no API key needed).
 Writes ../french-data/sentences.json, keyed by card id, and is resumable: words that
-already have sentences are skipped, so re-run it after new imports.
+already have sentences in the current format are skipped (older entries, e.g. English
+translations, are redone first), so re-run it after new imports.
+Translations are German, as direct as possible (cognates first), with the target's
+translation marked [[like this]] in "de", plus other meanings of the word.
 
     python tools/make_sentences.py                 # all missing words
     python tools/make_sentences.py --limit 40      # try a small batch first
@@ -29,18 +32,25 @@ LEVEL = {
     "known": "B2: 10-18 words, natural, idiomatic, varied contexts",
 }
 
-PROMPT = """You write French cloze sentences for a vocabulary trainer (like Lingvist).
+PROMPT = """You write French cloze sentences for a vocabulary trainer (like Lingvist). The learner is German.
 For each target word below, write {n} different sentences. Rules:
 - The sentence must contain the target EXACTLY as given (same spelling, accents, apostrophes, inflection), once.
-- The context must make the target the clearly best answer, given the English hint.
+- The context must make the target the clearly best answer, given the German hint.
 - Level per word is given. Prefer these words I already know for the rest of the sentence: {known}.
 - Natural, modern French; vary topics; no names of real people.
-For each word also give: lemma, part of speech (noun/verb/adj/adv/pron/prep/conj/det/other), gender for nouns (m/f), and a short English gloss of the target as used.
-Per sentence give the full English translation and "hint": the English for the target in that sentence.
+German translations: always the MOST DIRECT one. If German has (almost) the same word, use it
+(caractéristique -> Charakteristik, spécifications -> Spezifikationen, essentiel -> essenziell, agricole -> agrikulturell
+only if it is real German usage, otherwise landwirtschaftlich). Prefer cognates and word-for-word translations over
+idiomatic ones, as long as the German stays correct. Build each sentence so that this direct translation fits.
+For each word give: lemma, part of speech (noun/verb/adj/adv/pron/prep/conj/det/other), gender for nouns (m/f),
+"gloss": the direct German translation of the target as used, and "meanings": 2-5 other common German meanings
+of the lemma (not repeating the gloss; empty list if none).
+Per sentence: "de" = full German translation in which the German for the target is wrapped in [[ ]] (exactly one
+[[...]]), and "hint" = that German word or phrase (the text inside [[ ]], in the form used in the sentence).
 
 Reply with JSON only, no prose, shaped:
-{{"<id>": {{"lemma": "...", "pos": "...", "gender": null, "gloss": "...",
-  "sentences": [{{"fr": "...", "en": "...", "hint": "..."}}]}}}}
+{{"<id>": {{"lemma": "...", "pos": "...", "gender": null, "gloss": "...", "meanings": ["..."],
+  "sentences": [{{"fr": "...", "de": "... [[...]] ...", "hint": "..."}}]}}}}
 
 Words (id | target | level):
 {words}
@@ -64,8 +74,14 @@ def ask_claude(prompt):
 def check(word, entry):
     """Keep sentences that contain the target as a whole word."""
     pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?![\w])", re.I)
-    entry["sentences"] = [s for s in entry.get("sentences", []) if pat.search(s.get("fr", ""))]
+    entry["sentences"] = [s for s in entry.get("sentences", [])
+                          if pat.search(s.get("fr", "")) and s.get("de", "").count("[[") == 1]
     return entry
+
+
+def is_current(entry):
+    """Sentences in the current format (German, marked translation)."""
+    return bool(entry and entry.get("sentences") and "de" in entry["sentences"][0])
 
 
 def main():
@@ -84,10 +100,12 @@ def main():
             out.pop(w["id"], None)
 
     known = [w["word"] for w in words if w["stage"] == "known" and w["first_try_rate"] >= 0.6]
-    todo = [w for w in words if len(out.get(w["id"], {}).get("sentences", [])) < 1]
+    todo = [w for w in words if not is_current(out.get(w["id"]))]
+    # words that had sentences in an older format (English) come first, so the app never goes back to fewer cards
+    old = {i for i, e in out.items() if not is_current(e)}
     # hardest first: they need sentences soonest
     order = {"learning": 0, "new": 1, "young": 2, "familiar": 3, "known": 4}
-    todo.sort(key=lambda w: (order[w["stage"]], w["word"]))
+    todo.sort(key=lambda w: (w["id"] not in old, order[w["stage"]], w["word"]))
     if args.limit:
         todo = todo[:args.limit]
     print(f"{len(todo)} words to do, {len(out)} done")

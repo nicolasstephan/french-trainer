@@ -54,12 +54,16 @@ button.danger { color: var(--bad); }
 .hint { font-size: 1.15rem; color: var(--text-mid); margin: 14px 0 6px; }
 .sentence { font-size: 1.45rem; line-height: 1.7; margin: 0; }
 .gap { font: inherit; font-family: var(--mono); font-size: 1.3rem; color: var(--text); background: var(--input-bg);
-  border: 0; border-bottom: 2px solid var(--text); padding: 0 4px; margin: 0 2px; text-align: center; border-radius: 0; }
+  border: 0; border-bottom: 2px solid var(--text); padding: 0 4px; margin: 0 2px; text-align: center; border-radius: 0;
+  max-width: 100%; box-sizing: content-box; }
 .gap:focus { outline: 0; border-bottom-color: var(--text); background: var(--btn-hover); }
 .gap.good { border-bottom-color: var(--good); color: var(--good); }
 .gap.bad { border-bottom-color: var(--bad); }
 .solution { font-family: var(--mono); color: var(--bad); font-size: 1.1rem; }
 .translation { color: var(--text-dim); margin: 12px 0 0; min-height: 1.3em; }
+.translation mark { background: none; color: var(--text); font-weight: 600; border-bottom: 2px solid var(--text); }
+.meanings { color: var(--text-dim); font-size: .8rem; margin: 4px 0 0; }
+.meanings:empty { display: none; }
 .feedback { margin: 10px 0 0; min-height: 1.3em; font-size: .95rem; }
 .feedback.good { color: var(--good); }
 .feedback.bad { color: var(--bad); }

@@ -144,10 +144,16 @@ function renderCard() {
   const before = m ? sent.fr.slice(0, m.index) : sent.fr + " ", after = m ? sent.fr.slice(m.index + m[0].length) : "";
   current = w.id;
   current_target = m ? m[0] : w.word;
-  const width = Math.max(current_target.length, 3) + 1;
-  $("sentence").innerHTML = `${esc(before)}<span class="solution" id="solution" hidden></span><input class="gap" id="gap" style="width:${width}ch" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Missing word">${esc(after)}`;
+  $("sentence").innerHTML = `${esc(before)}<span class="solution" id="solution" hidden></span><input class="gap" id="gap" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Missing word">${esc(after)}`;
+  fitGap();
+  $("gap").addEventListener("input", fitGap);
   $("hint").textContent = sent.hint || s.gloss || "";
-  $("translation").textContent = sent.en || "";
+  // German translation with the target's translation marked [[...]] (older entries: plain English)
+  $("translation").innerHTML = sent.de
+    ? esc(sent.de).replace(/\[\[(.+?)\]\]/, "<mark>$1</mark>")
+    : esc(sent.en || "");
+  const more = (s.meanings ?? []).filter(Boolean);
+  $("meanings").textContent = more.length ? `auch: ${more.join(", ")}` : "";
   const st_ = stage(current);
   $("stage").textContent = st_;
   $("stage").style.color = `var(--st-${st_})`;
@@ -160,6 +166,14 @@ function renderCard() {
   $("gap").focus();
 }
 let current_target = "";
+
+/** The gap is as wide as the answer or what's typed, whichever is longer (in the gap's own font). */
+function fitGap() {
+  const gap = $("gap");
+  if (!gap) return;
+  const chars = Math.max(current_target.length, gap.value.length, 3);
+  gap.style.width = `${chars + 1.5}ch`;
+}
 
 function check(revealed = false) {
   const gap = $("gap");
@@ -193,6 +207,7 @@ function check(revealed = false) {
   $("solution").textContent = current_target + " ";
   $("solution").hidden = false;
   gap.value = "";
+  fitGap();
   gap.classList.add("bad");
   feedback(g === "accent" ? "Watch the accents. Type it once more." : "Type it once more.", "bad");
   $("reveal").hidden = true;
