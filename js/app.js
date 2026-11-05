@@ -4,7 +4,7 @@
 import { GitHubStore } from "./github-store.js";
 import { STYLES, getStyle, setStyle, getThemeMode, setThemeMode } from "./theme.js";
 import { checkForUpdate } from "./update-check.js";
-import { STAGES, GRADUATE, stageOf, replay, answer, grade } from "./srs.js";
+import { STAGES, GRADUATE, LADDER, stageOf, replayAll, answer, grade } from "./srs.js";
 
 const $ = (id) => document.getElementById(id);
 const LS = {
@@ -18,6 +18,7 @@ let words = [];            // words.json entries (with Lingvist history)
 let sentences = {};        // id -> { lemma, pos, gender, gloss, meanings, sentences: [{fr, de, hint}] }
 let progress = { version: 2, log: {}, days: {} };   // log: id -> [[unix s, ok], ...] answers given in this app
 let cards = new Map();     // id -> scheduler state (replayed)
+let iter = 0;              // answers given so far (all cards): the ladder's clock
 let byId = new Map(), byLemma = new Map();
 let progressStore = null, saveTimer = null;
 let current = null, previous = null, phase = "ask", missed = false;   // ask -> (retype) -> shown
@@ -83,7 +84,7 @@ function start() {
     if (!byLemma.has(key)) byLemma.set(key, []);
     byLemma.get(key).push(id);
   }
-  cards = new Map(words.map((w) => [w.id, replay([...(w.history ?? []), ...(progress.log[w.id] ?? [])])]));
+  ({ cards, iter } = replayAll(Object.fromEntries(words.map((w) => [w.id, [...(w.history ?? []), ...(progress.log[w.id] ?? [])]]))));
   next();
 }
 
@@ -107,19 +108,30 @@ async function saveNow() {
 // ---------- picking the next card ----------
 
 const playable = () => words.filter((w) => sentences[w.id]?.sentences?.length).map((w) => w.id);
-const SOON = 20 * 60;   // with nothing due, a learning card due within 20 min is shown early instead of waiting
+// Ladder cards answered within SESSION are "in flight": they come back by iteration and go first.
+// Older half-learned cards (e.g. from the last Lingvist session) wait with the due reviews.
+// At most FLIGHT cards are on the ladder at once; past that the gaps are filled with reviews.
+const SESSION = 3600, FLIGHT = 8;
 
-/** Learning cards first (when their step is due), then due reviews (most overdue first). */
+/** 1. in-flight ladder cards whose turn has come, 2. due reviews / waiting half-learned cards (oldest first;
+ *  reviews first while the ladder is full), 3. with nothing due: the in-flight card whose turn comes next. */
 function pick(ahead = false) {
   const now = nowS();
-  const ids = playable().filter((id) => id !== previous);
-  const by = (f) => ids.filter(f).sort((a, b) => cards.get(a).due - cards.get(b).due);
   const c = (id) => cards.get(id);
-  return by((id) => c(id).level < GRADUATE && c(id).due <= now)[0]
-    ?? by((id) => c(id).level >= GRADUATE && c(id).due <= now)[0]
-    ?? by((id) => c(id).level < GRADUATE && c(id).due <= now + SOON)[0]
-    ?? (ahead ? by(() => true)[0] : null)
-    ?? (playable().includes(previous) && c(previous).due <= now ? previous : null);
+  const all = playable();
+  const ids = all.filter((id) => id !== previous);
+  const learning = (id) => c(id).level < GRADUATE;
+  const inFlight = (id) => learning(id) && c(id).reps > 0 && now - c(id).last < SESSION;
+  const flying = all.filter(inFlight).length;
+  const byIter = (a, b) => c(a).dueIter - c(b).dueIter, byDue = (a, b) => c(a).due - c(b).due;
+  const turn = ids.filter((id) => inFlight(id) && c(id).dueIter <= iter).sort(byIter);
+  const reviews = ids.filter((id) => !learning(id) && c(id).due <= now).sort(byDue);
+  const waiting = ids.filter((id) => learning(id) && !inFlight(id)).sort(byDue);
+  const fill = flying >= FLIGHT ? [...reviews, ...waiting] : [...reviews, ...waiting].sort(byDue);
+  const soonest = ids.filter(inFlight).sort(byIter);
+  return turn[0] ?? fill[0] ?? soonest[0]
+    ?? (ahead ? ids.sort(byDue)[0] : null)
+    ?? (all.includes(previous) && (learning(previous) || c(previous).due <= now) ? previous : null);
 }
 
 function next(ahead = false) {
@@ -192,7 +204,7 @@ function fitGap() {
 function record(ok) {
   const t = nowS();
   (progress.log[current] ??= []).push([t, ok ? 1 : 0]);
-  answer(cards.get(current), ok, t);
+  answer(cards.get(current), ok, t, iter++);
   progress.days[today()] = (progress.days[today()] ?? 0) + 1;
   saveSoon();
   renderCounts();
@@ -216,7 +228,7 @@ function check(revealed = false) {
     $("solution").hidden = true;
     const c = cards.get(current);
     feedback(missed ? "Now you have it. (doesn't count)"
-      : c.level < GRADUATE ? `Correct · ${c.level}/${GRADUATE} · again in ${until(c.due)}`
+      : c.level < GRADUATE ? `Correct · ${c.level}/${GRADUATE} · again in ${LADDER[c.level]} cards`
       : `Correct · next in ${until(c.due)}`, "good");
     afterAnswer();
     return;
@@ -326,6 +338,8 @@ $("disconnect").addEventListener("click", () => {
   words = []; sentences = {}; progressStore = null;
   renderCounts(); renderStages(); show("setup");
 });
+
+if (LOCAL) window.__ft = { get target() { return target; }, get iter() { return iter; }, get card() { return cards.get(current); } };
 
 checkForUpdate();
 loadData();
