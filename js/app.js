@@ -214,7 +214,6 @@ function renderCard() {
   $("sentence").innerHTML = `${esc(before)}<span class="solution" id="solution" hidden></span><input class="gap" id="gap" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Missing word">${esc(after)}`;
   fitGap();
   $("gap").addEventListener("input", fitGap);
-  $("hint").textContent = sent.hint || s.gloss || "";
   // German translation with the target's translation marked [[...]] (older entries: plain English)
   $("translation").innerHTML = sent.de ? esc(sent.de).replace(/\[\[(.+?)\]\]/, "<mark>$1</mark>") : esc(sent.en || "");
   const more = (s.meanings ?? []).filter(Boolean);

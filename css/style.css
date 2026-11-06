@@ -52,7 +52,7 @@ button.danger { color: var(--bad); }
 .stage-tag { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; padding: 2px 8px; border-radius: 99px;
   border: 1px solid currentColor; }
 .hint { font-size: 1.15rem; color: var(--text-mid); margin: 14px 0 6px; }
-.sentence { font-size: 1.45rem; line-height: 1.7; margin: 0; }
+.sentence { font-size: 1.45rem; line-height: 1.7; margin: 14px 0 0; }
 .gap { font: inherit; font-family: var(--mono); font-size: 1.3rem; color: var(--text); background: var(--input-bg);
   border: 0; border-bottom: 2px solid var(--text); padding: 0 4px; margin: 0 2px; text-align: center; border-radius: 0;
   max-width: 100%; box-sizing: content-box; }
