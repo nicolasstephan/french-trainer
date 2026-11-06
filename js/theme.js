@@ -62,6 +62,26 @@ export function applyTheme() {
   const bg = getComputedStyle(root).getPropertyValue("--bg").trim();
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg);
   dispatchEvent(new CustomEvent("themechange", { detail: theme }));
+  syncFavicon(theme);
+}
+
+// Favicon: the icon set's icon.svg picks its color with prefers-color-scheme, which Chrome evaluates against the OS
+// (not the app's theme) and caches in the tab. Repaint each SVG icon link in the app's theme as a data: URL instead.
+const favicons = new Map();   // file URL -> Promise<svg text>
+async function syncFavicon(theme) {
+  for (const link of document.querySelectorAll('link[rel~="icon"]')) {
+    const src = link.dataset.src || link.getAttribute("href");
+    if (!src || !/\.svg([?#]|$)/i.test(src)) continue;
+    link.dataset.src = src;
+    try {
+      if (!favicons.has(src)) favicons.set(src, fetch(src).then((r) => (r.ok ? r.text() : Promise.reject(r.status))));
+      const text = await favicons.get(src);
+      if (document.documentElement.dataset.theme !== theme) return;   // switched again meanwhile
+      const color = theme === "dark" ? "#fff" : "#111";
+      const fixed = text.replace(/<style>[^<]*prefers-color-scheme[^<]*<\/style>/, `<style>svg{color:${color}}</style>`);
+      link.href = "data:image/svg+xml," + encodeURIComponent(fixed);
+    } catch { favicons.delete(src); /* keep the file icon */ }
+  }
 }
 
 mq.addEventListener("change", () => { if (getThemeMode() === "system") applyTheme(); });
