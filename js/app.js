@@ -60,11 +60,13 @@ async function loadData() {
   start();
 }
 
-/** Remote + local progress: union of the answer logs (v1 files from the first version had no log and are dropped). */
+/** Remote + local progress: union of the answer logs (v1 files from the first version had no log and are dropped);
+ *  settings (daily goal): the most recently changed wins. */
 function mergeProgress(...srcs) {
   const out = { version: 2, log: {}, days: {} };
   for (const src of srcs) {
     if (!src) continue;
+    if (src.goal && (src.goalSet ?? 0) >= (out.goalSet ?? 0)) { out.goal = src.goal; out.goalSet = src.goalSet ?? 0; }
     for (const [id, log] of Object.entries(src.log ?? {})) {
       const seen = new Map((out.log[id] ?? []).map((e) => [e[0], e]));
       for (const e of log) seen.set(e[0], e);
@@ -85,11 +87,53 @@ function start() {
     byLemma.get(key).push(id);
   }
   ({ cards, iter } = replayAll(Object.fromEntries(words.map((w) => [w.id, [...(w.history ?? []), ...(progress.log[w.id] ?? [])]]))));
-  next();
+  home();
 }
 
 const stage = (id) => stageOf(cards.get(id));
-const today = () => new Date().toISOString().slice(0, 10);
+
+// ---------- daily goal ----------
+
+const DEFAULT_GOAL = 60;
+const goal = () => progress.goal ?? DEFAULT_GOAL;
+/** Local calendar day of a unix time (s) as YYYY-MM-DD. */
+const dayKey = (t) => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const today = () => dayKey(nowS());
+/** Answers per day, counted from the app's answer log (so several devices add up). */
+function dayCounts() {
+  const n = {};
+  for (const log of Object.values(progress.log)) for (const [t] of log) { const k = dayKey(t); n[k] = (n[k] ?? 0) + 1; }
+  return n;
+}
+const doneToday = () => dayCounts()[today()] ?? 0;
+
+function home() {
+  current = null;
+  const counts = dayCounts(), g = goal(), n = counts[today()] ?? 0;
+  $("today-n").textContent = n;
+  $("today-goal").textContent = g;
+  $("goal-fill").style.width = `${Math.min(100, (100 * n) / g)}%`;
+  $("goal-fill").parentElement.classList.toggle("reached", n >= g);
+  $("today-text").textContent = n >= g ? "Daily goal reached. Extra practice still counts."
+    : n ? `${g - n} cards to go.` : "Not started yet.";
+  // last 14 days, oldest first
+  const days = [];
+  for (let i = 13; i >= 0; i--) days.push(dayKey(nowS() - i * 86400));
+  $("days").innerHTML = days.map((k) => {
+    const c = counts[k] ?? 0, wd = new Date(`${k}T12:00`).toLocaleDateString([], { weekday: "narrow" });
+    return `<div class="day${c >= g ? " reached" : ""}${k === today() ? " today" : ""}" title="${k}: ${c} / ${g}">`
+      + `<div class="box"><span style="height:${Math.min(100, (100 * c) / g)}%"></span></div>${wd}</div>`;
+  }).join("");
+  // streak: days in a row with the goal reached (today counts once reached, else the streak runs to yesterday)
+  let streak = 0;
+  for (let i = (counts[today()] ?? 0) >= g ? 0 : 1; (counts[dayKey(nowS() - i * 86400)] ?? 0) >= g; i++) streak++;
+  const reached = days.filter((k) => (counts[k] ?? 0) >= g).length;
+  $("streak").textContent = `Goal reached on ${reached} of the last 14 days` + (streak ? ` · streak ${streak} day${streak > 1 ? "s" : ""}` : "");
+  $("practice").textContent = n >= g ? "Practice more" : n ? `Continue · ${n} / ${g}` : "Practice";
+  renderCounts();
+  renderStages();
+  show("home");
+}
 
 function saveSoon(delay = 4000) {
   progress.updated = new Date().toISOString();
@@ -205,7 +249,6 @@ function record(ok) {
   const t = nowS();
   (progress.log[current] ??= []).push([t, ok ? 1 : 0]);
   answer(cards.get(current), ok, t, iter++);
-  progress.days[today()] = (progress.days[today()] ?? 0) + 1;
   saveSoon();
   renderCounts();
 }
@@ -227,9 +270,10 @@ function check(revealed = false) {
     gap.readOnly = true;
     $("solution").hidden = true;
     const c = cards.get(current);
-    feedback(missed ? "Now you have it. (doesn't count)"
+    const goalNow = !missed && doneToday() === goal() ? " · Daily goal reached!" : "";
+    feedback((missed ? "Now you have it. (doesn't count)"
       : c.level < GRADUATE ? `Correct · ${c.level}/${GRADUATE} · again in ${LADDER[c.level]} cards`
-      : `Correct · next in ${until(c.due)}`, "good");
+      : `Correct · next in ${until(c.due)}`) + goalNow, "good");
     afterAnswer();
     return;
   }
@@ -282,7 +326,10 @@ function renderCounts() {
     if (c.level < GRADUATE && c.ok) learning++;
     else if (c.due <= now) due++;
   }
-  $("counts").textContent = words.length ? `${learning} learning · ${due} due · ${progress.days[today()] ?? 0} today` : "";
+  const n = doneToday(), g = goal();
+  $("counts").textContent = words.length ? `${learning} learning · ${due} due · ${n}/${g} today` : "";
+  $("session-fill").style.width = `${Math.min(100, (100 * n) / g)}%`;
+  $("session-fill").parentElement.classList.toggle("reached", n >= g);
 }
 
 function renderStages() {
@@ -297,7 +344,7 @@ function renderStages() {
 // ---------- ui ----------
 
 function show(id) {
-  for (const s of ["setup", "loading", "trainer", "done"]) $(s).hidden = s !== id;
+  for (const s of ["setup", "loading", "home", "trainer", "done"]) $(s).hidden = s !== id;
 }
 function error(msg) { $("error").textContent = msg; $("error").hidden = !msg; }
 
@@ -305,6 +352,9 @@ $("answer-form").addEventListener("submit", (e) => { e.preventDefault(); check()
 $("next").addEventListener("click", () => check());
 $("reveal").addEventListener("click", () => check(true));
 $("ahead").addEventListener("click", () => next(true));
+$("practice").addEventListener("click", () => next());
+const toHome = () => { if (words.length) { if (saveTimer) saveNow(); home(); } };
+for (const b of ["to-home", "done-home", "logo-home"]) $(b).addEventListener("click", toHome);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && phase === "shown" && !$("settings").open && current) { e.preventDefault(); check(); }
 });
@@ -316,6 +366,7 @@ function openSettings() {
   const { repo, token } = config();
   form.repo.value = repo || "nicolasstephan/french-data";
   form.token.value = token;
+  form.goal.value = goal();
   $("theme-mode").value = getThemeMode();
   $("style-mode").innerHTML = STYLES.map((s) => `<option value="${s.id}">${s.label}</option>`).join("");
   $("style-mode").value = getStyle();
@@ -327,10 +378,20 @@ $("settings-cancel").addEventListener("click", () => dlg.close());
 $("theme-mode").addEventListener("change", (e) => setThemeMode(e.target.value));
 $("style-mode").addEventListener("change", (e) => setStyle(e.target.value));
 form.addEventListener("submit", () => {
-  LS.set("ft.repo", form.repo.value.trim());
-  LS.set("ft.token", form.token.value.trim());
+  const repo = form.repo.value.trim(), token = form.token.value.trim();
+  const g = Math.round(Number(form.goal.value));
+  if (g >= 1 && g !== goal()) {
+    progress.goal = g;
+    progress.goalSet = nowS();
+    saveSoon(500);
+  }
   error("");
-  loadData();
+  if (repo !== config().repo || token !== config().token || !words.length) {
+    LS.set("ft.repo", repo);
+    LS.set("ft.token", token);
+    loadData();
+  } else if (!current) home();
+  else renderCounts();
 });
 $("disconnect").addEventListener("click", () => {
   LS.del("ft.token"); LS.del("ft.cache");

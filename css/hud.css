@@ -12,3 +12,6 @@
 [data-style="hud"] .stage-bar span:nth-child(n) { min-width: 2px; }
 [data-style="hud"] dialog h2 { font-family: var(--display); text-transform: uppercase; letter-spacing: .12em; }
 [data-style="hud"] .icon-btn { border: 1px solid var(--btn-border); }
+[data-style="hud"] .today-count { font-family: var(--mono); }
+[data-style="hud"] .day { font-family: var(--mono); }
+[data-style="hud"] .practice-btn { font-size: 1rem; letter-spacing: .2em; }

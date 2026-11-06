@@ -82,6 +82,26 @@ button.danger { color: var(--bad); }
 
 .error { color: var(--bad); margin: 0; }
 
+/* home */
+#home { display: flex; flex-direction: column; gap: 14px; }
+.home-link { display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 0; min-height: 0; color: inherit; }
+.home-link:hover { background: none; }
+.small { font-size: .85rem; margin: 8px 0 0; }
+.today-count { font-size: 2.2rem; margin: 4px 0 10px; font-variant-numeric: tabular-nums; }
+.today-count .dim { font-size: 1rem; }
+.goal-bar { height: 8px; border-radius: 4px; background: var(--sec-border); overflow: hidden; }
+.goal-bar span { display: block; height: 100%; width: 0; background: var(--text-mid); transition: width .3s; }
+.goal-bar.reached span { background: var(--good); }
+.session-bar { height: 4px; margin-bottom: 10px; }
+.days { display: grid; grid-template-columns: repeat(14, 1fr); gap: 4px; }
+.day { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: .7rem; color: var(--text-dim); }
+.day .box { width: 100%; aspect-ratio: 1; border-radius: 4px; background: var(--sec-border); position: relative; overflow: hidden; }
+.day .box span { position: absolute; left: 0; right: 0; bottom: 0; background: var(--text-dim); }
+.day.reached .box span { background: var(--good); }
+.day.today .box { outline: 1px solid var(--text); outline-offset: 1px; }
+.practice-btn { width: 100%; min-height: 56px; font-size: 1.1rem; }
+#done .actions { margin-top: 12px; }
+
 dialog { background: var(--popup-bg); color: var(--text); border: 1px solid var(--popup-border); border-radius: 12px;
   padding: 18px; width: min(520px, calc(100vw - 32px)); }
 dialog::backdrop { background: rgba(0,0,0,.45); }

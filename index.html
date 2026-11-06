@@ -17,8 +17,7 @@
 </head>
 <body>
   <header class="top">
-    <img class="logo" src="icons/icon.svg" alt="">
-    <h1>French Trainer</h1>
+    <button class="home-link" id="logo-home" aria-label="Menu"><img class="logo" src="icons/icon.svg" alt=""><h1>French Trainer</h1></button>
     <div class="counts" id="counts"></div>
     <button id="settings-open" class="icon-btn" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
@@ -33,9 +32,25 @@
     </section>
 
     <section id="loading" class="card"><p class="dim">Loading…</p></section>
+
+    <section id="home" hidden>
+      <div class="card today">
+        <h2 class="hud-label">Today</h2>
+        <p class="today-count"><span id="today-n">0</span> <span class="dim">/ <span id="today-goal">60</span> cards</span></p>
+        <div class="goal-bar"><span id="goal-fill"></span></div>
+        <p class="dim small" id="today-text"></p>
+      </div>
+      <div class="card">
+        <h2 class="hud-label">Last 14 days</h2>
+        <div class="days" id="days"></div>
+        <p class="dim small" id="streak"></p>
+      </div>
+      <button class="primary practice-btn" id="practice">Practice</button>
+    </section>
     <p id="error" class="error" role="status" hidden></p>
 
     <section id="trainer" hidden>
+      <div class="goal-bar session-bar" title="Daily goal"><span id="session-fill"></span></div>
       <div class="card cloze-card">
         <div class="meta"><span id="stage" class="stage-tag"></span><span id="pos" class="dim"></span></div>
         <p class="hint" id="hint"></p>
@@ -48,6 +63,8 @@
         <div class="related" id="related"></div>
       </div>
       <div class="actions">
+        <button type="button" class="ghost" id="to-home">Menu</button>
+        <span class="spacer"></span>
         <button type="button" class="ghost" id="reveal">Show</button>
         <button type="button" class="primary" id="next">Check</button>
       </div>
@@ -56,7 +73,10 @@
     <section id="done" class="card" hidden>
       <h2 class="hud-label">Nothing due</h2>
       <p id="done-text"></p>
-      <button class="primary" id="ahead">Practice ahead</button>
+      <div class="actions">
+        <button class="ghost" id="done-home">Menu</button>
+        <button class="primary" id="ahead">Practice ahead</button>
+      </div>
     </section>
 
     <section class="stages" aria-label="Words by stage">
@@ -75,6 +95,8 @@
       </ol>
       <label>Repository<input name="repo" placeholder="nicolasstephan/french-data" autocomplete="off"></label>
       <label>Token<input name="token" type="password" placeholder="github_pat_…" autocomplete="off"></label>
+      <h3 class="lbl">Practice</h3>
+      <label>Daily goal (cards)<input name="goal" type="number" min="5" max="1000" step="5" inputmode="numeric"></label>
       <h3 class="lbl">Look</h3>
       <label>Appearance<select id="theme-mode">
         <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
