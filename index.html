@@ -38,14 +38,48 @@
         <h2 class="hud-label">Today</h2>
         <p class="today-count"><span id="today-n">0</span> <span class="dim">/ <span id="today-goal">60</span> cards</span></p>
         <div class="goal-bar"><span id="goal-fill"></span></div>
+        <div id="read-row">
+          <p class="today-count read-count"><span id="read-n">0</span> <span class="dim">/ <span id="read-goal">3</span> pages read</span></p>
+          <div class="goal-bar"><span id="read-fill"></span></div>
+        </div>
         <p class="dim small" id="today-text"></p>
+        <p class="dim small" id="new-text"></p>
       </div>
       <div class="card">
         <h2 class="hud-label">Last 14 days</h2>
         <div class="days" id="days"></div>
         <p class="dim small" id="streak"></p>
       </div>
-      <button class="primary practice-btn" id="practice">Practice</button>
+      <div class="home-actions">
+        <button class="primary practice-btn" id="practice">Practice</button>
+        <button class="practice-btn" id="read">Read</button>
+      </div>
+    </section>
+
+    <section id="library" hidden>
+      <div class="card">
+        <h2 class="hud-label">Library</h2>
+        <div class="lib-list" id="lib-list"></div>
+      </div>
+      <div class="actions"><button type="button" class="ghost" id="lib-home">Menu</button><span class="spacer"></span></div>
+    </section>
+
+    <section id="reader" hidden>
+      <div class="goal-bar session-bar"><span id="rd-goal"></span></div>
+      <div class="rd-top">
+        <select id="rd-chapter" aria-label="Chapter"></select>
+        <button type="button" class="icon-btn" id="rd-smaller" aria-label="Smaller text" title="Smaller text">A−</button>
+        <button type="button" class="icon-btn" id="rd-bigger" aria-label="Larger text" title="Larger text">A+</button>
+      </div>
+      <article class="card rd-text" id="rd-text" lang="fr"></article>
+      <p class="dim small rd-meta"><span id="rd-title"></span> · <span id="rd-pos"></span></p>
+      <div class="actions">
+        <button type="button" class="ghost" id="rd-lib">Library</button>
+        <span class="spacer"></span>
+        <button type="button" class="ghost" id="rd-prev">Back</button>
+        <button type="button" class="primary" id="rd-next">Next</button>
+      </div>
+      <p class="rd-toast" id="rd-toast" role="status" hidden></p>
     </section>
     <p id="error" class="error" role="status" hidden></p>
 
@@ -84,6 +118,24 @@
     </section>
   </main>
 
+  <aside class="sheet" id="sheet" hidden aria-live="polite">
+    <div class="sheet-head">
+      <span class="sheet-word" id="sheet-word" lang="fr"></span>
+      <span class="dim small" id="sheet-lemma"></span>
+      <span class="spacer"></span>
+      <button type="button" class="icon-btn" id="sheet-close" aria-label="Close">✕</button>
+    </div>
+    <p class="sheet-gloss" id="sheet-gloss" lang="de"></p>
+    <p class="dim small" id="sheet-none">Not in the glossary yet. Translate the sentence below.</p>
+    <p class="meanings" id="sheet-other" lang="de"></p>
+    <p class="sheet-sentence" id="sheet-sentence" lang="fr"></p>
+    <div class="sheet-foot">
+      <span id="sheet-own"></span>
+      <span class="spacer"></span>
+      <a id="sheet-deepl" target="_blank" rel="noopener">Sentence in DeepL ↗</a>
+    </div>
+  </aside>
+
   <dialog id="settings">
     <form method="dialog" id="settings-form">
       <h2>Settings</h2>
@@ -96,6 +148,8 @@
       <label>Token<input name="token" type="password" placeholder="github_pat_…" autocomplete="off"></label>
       <h3 class="lbl">Practice</h3>
       <label>Daily goal (cards)<input name="goal" type="number" min="5" max="1000" step="5" inputmode="numeric"></label>
+      <label>New words per day, at most (fewer when you are struggling)<input name="newmax" type="number" min="0" max="100" step="1" inputmode="numeric"></label>
+      <label>Daily reading goal (pages of 220 words, 0 = off)<input name="readgoal" type="number" min="0" max="100" step="0.5" inputmode="decimal"></label>
       <h3 class="lbl">Look</h3>
       <label>Appearance<select id="theme-mode">
         <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>

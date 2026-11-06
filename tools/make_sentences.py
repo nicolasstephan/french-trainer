@@ -101,23 +101,27 @@ def main():
     ap.add_argument("--data", default=str(data_dir()))
     ap.add_argument("--limit", type=int, default=0, help="max words this run")
     ap.add_argument("--redo", default="", help="comma-separated words to regenerate")
+    ap.add_argument("--extra", action="store_true", help="only the queued new words (extra_words.json, by rank)")
     args = ap.parse_args()
     data = Path(args.data)
     words = json.loads((data / "words.json").read_text(encoding="utf-8"))["words"]
+    xp = data / "extra_words.json"
+    extra = json.loads(xp.read_text(encoding="utf-8"))["words"] if xp.exists() else []
     out_path = data / "sentences.json"
     out = json.loads(out_path.read_text(encoding="utf-8")) if out_path.exists() else {}
     redo = {w.strip() for w in args.redo.split(",") if w.strip()}
-    for w in words:
+    for w in words + extra:
         if w["word"] in redo:
             out.pop(w["id"], None)
 
     known = [w["word"] for w in words if w["stage"] == "known" and w["first_try_rate"] >= 0.6]
-    todo = [w for w in words if not is_current(out.get(w["id"]))]
+    todo = [w for w in (extra if args.extra else words + extra) if not is_current(out.get(w["id"]))]
     # words that had sentences in an older format (English) come first, so the app never goes back to fewer cards
     old = {i for i, e in out.items() if not is_current(e)}
     # hardest first: they need sentences soonest
     order = {"learning": 0, "new": 1, "young": 2, "familiar": 3, "known": 4}
-    todo.sort(key=lambda w: (w["id"] not in old, order[w["stage"]], w["word"]))
+    # queued new words (tools/add_words.py) first, in queue order: the app introduces them in that order
+    todo.sort(key=lambda w: (w["id"] not in old, "rank" not in w, w.get("rank", 0), order[w["stage"]], w["word"]))
     if args.limit:
         todo = todo[:args.limit]
     print(f"{len(todo)} words to do, {len(out)} done")

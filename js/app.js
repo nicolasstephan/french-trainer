@@ -5,6 +5,7 @@ import { GitHubStore } from "./github-store.js";
 import { STYLES, getStyle, setStyle, getThemeMode, setThemeMode } from "./theme.js";
 import { checkForUpdate } from "./update-check.js";
 import { STAGES, GRADUATE, LADDER, stageOf, replayAll, answer, grade } from "./srs.js";
+import { initReader, openLibrary, emptyReading, mergeReading, readingDays, key as formKey, DEFAULT_READ_PAGES, PAGE_WORDS } from "./reader.js";
 
 const $ = (id) => document.getElementById(id);
 const LS = {
@@ -16,10 +17,10 @@ const nowS = () => Math.floor(Date.now() / 1000);
 
 let words = [];            // words.json entries (with Lingvist history)
 let sentences = {};        // id -> { lemma, pos, gender, gloss, meanings, sentences: [{fr, de, hint}] }
-let progress = { version: 2, log: {}, days: {} };   // log: id -> [[unix s, ok], ...] answers given in this app
+let progress = { version: 2, log: {}, days: {}, reading: emptyReading() };   // log: id -> [[unix s, ok], ...] answers given in this app
 let cards = new Map();     // id -> scheduler state (replayed)
 let iter = 0;              // answers given so far (all cards): the ladder's clock
-let byId = new Map(), byLemma = new Map();
+let byId = new Map(), byLemma = new Map(), byForm = new Map();
 let progressStore = null, saveTimer = null;
 let current = null, previous = null, phase = "ask", missed = false;   // ask -> (retype) -> shown
 
@@ -33,7 +34,7 @@ const LOCAL = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && new URLSea
 async function loadData() {
   if (LOCAL) {
     const get = async (f) => { const r = await fetch(`../french-data/${f}`, { cache: "no-store" }); return r.ok ? r.json() : null; };
-    words = (await get("words.json"))?.words ?? [];
+    words = withExtra((await get("words.json"))?.words, (await get("extra_words.json"))?.words);
     sentences = (await get("sentences.json")) ?? {};
     progress = mergeProgress(null, LS.get("ft.progress"));
     start();
@@ -45,8 +46,9 @@ async function loadData() {
   const store = (path) => new GitHubStore({ repo, token, path });
   try {
     progressStore = store("progress.json");
-    const [w, s, p] = await Promise.all([store("words.json").loadRaw(), store("sentences.json").loadRaw(), progressStore.load()]);
-    words = w?.words ?? [];
+    const [w, x, s, p] = await Promise.all([store("words.json").loadRaw(), store("extra_words.json").loadRaw(),
+      store("sentences.json").loadRaw(), progressStore.load()]);
+    words = withExtra(w?.words, x?.words);
     sentences = s ?? {};
     LS.set("ft.cache", { words, sentences });
     progress = mergeProgress(p, LS.get("ft.progress"));
@@ -60,13 +62,21 @@ async function loadData() {
   start();
 }
 
+/** Lingvist cards + the queue of new words (no history; introduced by newWordCapacity, in queue order). */
+function withExtra(lingvist, extra) {
+  const out = lingvist ?? [], have = new Set(out.map((w) => w.id));
+  for (const w of extra ?? []) if (!have.has(w.id)) out.push({ ...w, history: [], extra: true });
+  return out;
+}
+
 /** Remote + local progress: union of the answer logs (v1 files from the first version had no log and are dropped);
  *  settings (daily goal): the most recently changed wins. */
 function mergeProgress(...srcs) {
-  const out = { version: 2, log: {}, days: {} };
+  const out = { version: 2, log: {}, days: {}, reading: mergeReading(...srcs.map((x) => x?.reading)) };
   for (const src of srcs) {
     if (!src) continue;
     if (src.goal && (src.goalSet ?? 0) >= (out.goalSet ?? 0)) { out.goal = src.goal; out.goalSet = src.goalSet ?? 0; }
+    if (src.maxNew != null && (src.maxNewSet ?? 0) >= (out.maxNewSet ?? -1)) { out.maxNew = src.maxNew; out.maxNewSet = src.maxNewSet ?? 0; }
     for (const [id, log] of Object.entries(src.log ?? {})) {
       const seen = new Map((out.log[id] ?? []).map((e) => [e[0], e]));
       for (const e of log) seen.set(e[0], e);
@@ -80,12 +90,15 @@ function mergeProgress(...srcs) {
 function start() {
   byId = new Map(words.map((w) => [w.id, w]));
   byLemma = new Map();
+  byForm = new Map(words.map((w) => [formKey(w.word), w.id]));
   for (const [id, s] of Object.entries(sentences)) {
     const key = (s.lemma || "").toLowerCase();
     if (!key) continue;
     if (!byLemma.has(key)) byLemma.set(key, []);
     byLemma.get(key).push(id);
   }
+  // the reading goal counts from the first day this version runs (older days: cards only)
+  if (!progress.reading.since) progress.reading.since = today();
   ({ cards, iter } = replayAll(Object.fromEntries(words.map((w) => [w.id, [...(w.history ?? []), ...(progress.log[w.id] ?? [])]]))));
   home();
 }
@@ -106,30 +119,60 @@ function dayCounts() {
   return n;
 }
 const doneToday = () => dayCounts()[today()] ?? 0;
+// reading goal: set in pages (progress.reading.pages), counted in words (a page = PAGE_WORDS)
+const readPages = () => progress.reading.pages ?? DEFAULT_READ_PAGES;
+const readGoal = () => readPages() * PAGE_WORDS;
+const pagesOf = (w) => { const p = w / PAGE_WORDS; return p >= 10 || Number.isInteger(p) ? String(Math.round(p)) : p.toFixed(1); };
+const readToday = () => ({ n: readingDays(progress.reading, dayKey)[today()] ?? 0, goal: readGoal() });
+/** Share of the day's goals done (0..1), the average of cards and reading; reached = both done. */
+function dayScore(k, counts, reads) {
+  const c = Math.min(1, (counts[k] ?? 0) / goal());
+  const rg = readGoal(), readOn = rg > 0 && k >= (progress.reading.since ?? k);
+  if (!readOn) return { f: c, reached: c >= 1 };
+  const r = Math.min(1, (reads[k] ?? 0) / rg);
+  return { f: (c + r) / 2, reached: c >= 1 && r >= 1 };
+}
 
 function home() {
   current = null;
-  const counts = dayCounts(), g = goal(), n = counts[today()] ?? 0;
+  const counts = dayCounts(), reads = readingDays(progress.reading, dayKey), g = goal(), n = counts[today()] ?? 0;
+  const rg = readGoal(), rn = reads[today()] ?? 0;
   $("today-n").textContent = n;
   $("today-goal").textContent = g;
   $("goal-fill").style.width = `${Math.min(100, (100 * n) / g)}%`;
   $("goal-fill").parentElement.classList.toggle("reached", n >= g);
-  $("today-text").textContent = n >= g ? "Daily goal reached. Extra practice still counts."
-    : n ? `${g - n} cards to go.` : "Not started yet.";
+  $("read-row").hidden = !rg;
+  $("read-n").textContent = pagesOf(rn);
+  $("read-goal").textContent = readPages();
+  $("read-row").title = `${rn} / ${rg} words (a page = ${PAGE_WORDS} words)`;
+  $("read-fill").style.width = `${Math.min(100, (100 * rn) / (rg || 1))}%`;
+  $("read-fill").parentElement.classList.toggle("reached", rn >= rg);
+  const left = [n < g ? `${g - n} cards` : "", rg && rn < rg ? `${pagesOf(rg - rn)} page${rg - rn > PAGE_WORDS ? "s" : ""} of reading` : ""].filter(Boolean);
+  $("today-text").textContent = !left.length ? "Daily goal reached. Extra practice still counts."
+    : n || rn ? `${left.join(" and ")} to go.` : "Not started yet.";
   // last 14 days, oldest first
   const days = [];
   for (let i = 13; i >= 0; i--) days.push(dayKey(nowS() - i * 86400));
   $("days").innerHTML = days.map((k) => {
-    const c = counts[k] ?? 0, wd = new Date(`${k}T12:00`).toLocaleDateString([], { weekday: "narrow" });
-    return `<div class="day${c >= g ? " reached" : ""}${k === today() ? " today" : ""}" title="${k}: ${c} / ${g}">`
-      + `<div class="box"><span style="height:${Math.min(100, (100 * c) / g)}%"></span></div>${wd}</div>`;
+    const c = counts[k] ?? 0, r = reads[k] ?? 0, sc = dayScore(k, counts, reads);
+    const wd = new Date(`${k}T12:00`).toLocaleDateString([], { weekday: "narrow" });
+    return `<div class="day${sc.reached ? " reached" : ""}${k === today() ? " today" : ""}" title="${k}: ${c} / ${g} cards${r ? ` · ${pagesOf(r)} pages read` : ""}">`
+      + `<div class="box"><span style="height:${100 * sc.f}%"></span></div>${wd}</div>`;
   }).join("");
   // streak: days in a row with the goal reached (today counts once reached, else the streak runs to yesterday)
+  const ok = (i) => dayScore(dayKey(nowS() - i * 86400), counts, reads).reached;
   let streak = 0;
-  for (let i = (counts[today()] ?? 0) >= g ? 0 : 1; (counts[dayKey(nowS() - i * 86400)] ?? 0) >= g; i++) streak++;
-  const reached = days.filter((k) => (counts[k] ?? 0) >= g).length;
+  for (let i = ok(0) ? 0 : 1; ok(i); i++) streak++;
+  const reached = days.filter((k) => dayScore(k, counts, reads).reached).length;
   $("streak").textContent = `Goal reached on ${reached} of the last 14 days` + (streak ? ` · streak ${streak} day${streak > 1 ? "s" : ""}` : "");
+  const cap = newWordCapacity();
+  $("new-text").textContent = !cap.queued && !cap.used ? "No new words queued. Run tools/add_words.py."
+    : `New words today: ${cap.used} · allowance ${cap.budget} of ${maxNew()}`
+      + (cap.acc != null ? ` (${Math.round(100 * cap.acc)} % right first try, last ${RECENT})` : "")
+      + (cap.reason && cap.reason !== "today's new words done" ? ` · now: ${cap.reason}` : "")
+      + ` · ${cap.queued} queued`;
   $("practice").textContent = n >= g ? "Practice more" : n ? `Continue · ${n} / ${g}` : "Practice";
+  $("read").textContent = !rg || rn >= rg ? "Read" : rn ? `Read · ${pagesOf(rn)} / ${readPages()}` : "Read";
   renderCounts();
   renderStages();
   show("home");
@@ -151,6 +194,48 @@ async function saveNow() {
 
 // ---------- picking the next card ----------
 
+// ---------- new words: only when the words in training are going well ----------
+
+const DEFAULT_MAX_NEW = 15;   // new words a day at full capacity
+const maxNew = () => progress.maxNew ?? DEFAULT_MAX_NEW;
+const RECENT = 50;            // answers that decide today's capacity
+const unseen = (id) => cards.get(id).reps === 0;
+
+/** New words introduced today (first answer today, no Lingvist history). */
+function newToday() {
+  let n = 0;
+  for (const [id, log] of Object.entries(progress.log)) {
+    if (log.length && !byId.get(id)?.history?.length && dayKey(log[0][0]) === today()) n++;
+  }
+  return n;
+}
+
+/** How many new words today, and whether one may come now.
+ *  Budget: maxNew × f, f from first-try accuracy over the last RECENT answers (75 % → 0, 90 % → full).
+ *  Not now while: 3+ words in training were just missed (level 0), the ladder is nearly full, or > 15 reviews are due.
+ *  Pace: new words are spread over the day's goal instead of coming in a burst. */
+function newWordCapacity() {
+  const now = nowS();
+  const recent = Object.values(progress.log).flat().sort((a, b) => b[0] - a[0]).slice(0, RECENT);
+  const acc = recent.length >= 15 ? recent.filter((e) => e[1]).length / recent.length : null;
+  const f = acc == null ? 2 / 3 : Math.min(1, Math.max(0, (acc - 0.75) / 0.15));
+  const budget = Math.round(maxNew() * f), used = newToday();
+  const ids = playable();
+  const c = (id) => cards.get(id);
+  const training = ids.filter((id) => c(id).level < GRADUATE && c(id).reps > 0 && now - c(id).last < SESSION);
+  const struggling = training.filter((id) => c(id).level === 0).length;
+  const due = ids.filter((id) => c(id).level >= GRADUATE && c(id).due <= now).length;
+  const queued = ids.filter(unseen).length;
+  let reason = "";
+  if (!queued) reason = "queue empty (run tools/add_words.py)";
+  else if (used >= budget) reason = budget ? "today's new words done" : `first-try rate ${Math.round(100 * acc)} %: consolidate first`;
+  else if (struggling >= 3) reason = `${struggling} words need work first`;
+  else if (training.length >= FLIGHT - 2) reason = "enough words in training";
+  else if (due > 15) reason = `${due} reviews first`;
+  const pace = used < Math.ceil(budget * Math.min(1, (doneToday() + 1) / goal()));
+  return { budget, used, acc, queued, reason, ok: !reason && pace, okAnyPace: !reason };
+}
+
 const playable = () => words.filter((w) => sentences[w.id]?.sentences?.length).map((w) => w.id);
 // Ladder cards answered within SESSION are "in flight": they come back by iteration and go first.
 // Older half-learned cards (e.g. from the last Lingvist session) wait with the due reviews.
@@ -170,11 +255,17 @@ function pick(ahead = false) {
   const byIter = (a, b) => c(a).dueIter - c(b).dueIter, byDue = (a, b) => c(a).due - c(b).due;
   const turn = ids.filter((id) => inFlight(id) && c(id).dueIter <= iter).sort(byIter);
   const reviews = ids.filter((id) => !learning(id) && c(id).due <= now).sort(byDue);
-  const waiting = ids.filter((id) => learning(id) && !inFlight(id)).sort(byDue);
+  const waiting = ids.filter((id) => learning(id) && !inFlight(id) && !unseen(id)).sort(byDue);
+  // new words from the queue, in queue order, only while there is capacity (newWordCapacity)
+  const cap = newWordCapacity();
+  // book look-ahead and tapped words first (together, in queue order); Lexique frequency words only after them
+  const tier = (id) => (byId.get(id).source === "freq" ? 1 : 0);
+  const byRank = (a, b) => tier(a) - tier(b) || (byId.get(a).rank ?? 1e9) - (byId.get(b).rank ?? 1e9);
+  const fresh = cap.okAnyPace ? ids.filter(unseen).sort(byRank) : [];
   const fill = flying >= FLIGHT ? [...reviews, ...waiting] : [...reviews, ...waiting].sort(byDue);
   const soonest = ids.filter(inFlight).sort(byIter);
-  return turn[0] ?? fill[0] ?? soonest[0]
-    ?? (ahead ? ids.sort(byDue)[0] : null)
+  return turn[0] ?? (cap.ok ? fresh[0] : null) ?? fill[0] ?? soonest[0] ?? fresh[0]
+    ?? (ahead ? ids.filter((id) => !unseen(id)).sort(byDue)[0] : null)
     ?? (all.includes(previous) && (learning(previous) || c(previous).due <= now) ? previous : null);
 }
 
@@ -323,6 +414,7 @@ function renderCounts() {
   let learning = 0, due = 0;
   for (const id of playable()) {
     const c = cards.get(id);
+    if (!c.reps) continue;   // queued new word
     if (c.level < GRADUATE && c.ok) learning++;
     else if (c.due <= now) due++;
   }
@@ -344,7 +436,9 @@ function renderStages() {
 // ---------- ui ----------
 
 function show(id) {
-  for (const s of ["setup", "loading", "home", "trainer", "done"]) $(s).hidden = s !== id;
+  for (const s of ["setup", "loading", "home", "trainer", "done", "library", "reader"]) $(s).hidden = s !== id;
+  if (id !== "reader") $("sheet").hidden = true;
+  document.querySelector(".stages").hidden = id === "reader" || id === "library";
 }
 function error(msg) { $("error").textContent = msg; $("error").hidden = !msg; }
 
@@ -353,6 +447,7 @@ $("next").addEventListener("click", () => check());
 $("reveal").addEventListener("click", () => check(true));
 $("ahead").addEventListener("click", () => next(true));
 $("practice").addEventListener("click", () => next());
+$("read").addEventListener("click", () => openLibrary());
 const toHome = () => { if (words.length) { if (saveTimer) saveNow(); home(); } };
 for (const b of ["to-home", "done-home", "logo-home"]) $(b).addEventListener("click", toHome);
 document.addEventListener("keydown", (e) => {
@@ -367,6 +462,8 @@ function openSettings() {
   form.repo.value = repo || "nicolasstephan/french-data";
   form.token.value = token;
   form.goal.value = goal();
+  form.newmax.value = maxNew();
+  form.readgoal.value = readPages();
   $("theme-mode").value = getThemeMode();
   $("style-mode").innerHTML = STYLES.map((s) => `<option value="${s.id}">${s.label}</option>`).join("");
   $("style-mode").value = getStyle();
@@ -379,10 +476,22 @@ $("theme-mode").addEventListener("change", (e) => setThemeMode(e.target.value));
 $("style-mode").addEventListener("change", (e) => setStyle(e.target.value));
 form.addEventListener("submit", () => {
   const repo = form.repo.value.trim(), token = form.token.value.trim();
+  const nm = Math.round(Number(form.newmax.value));
+  if (form.newmax.value !== "" && nm >= 0 && nm !== maxNew()) {
+    progress.maxNew = nm;
+    progress.maxNewSet = nowS();
+    saveSoon(500);
+  }
   const g = Math.round(Number(form.goal.value));
   if (g >= 1 && g !== goal()) {
     progress.goal = g;
     progress.goalSet = nowS();
+    saveSoon(500);
+  }
+  const rp = Math.round(Number(form.readgoal.value) * 2) / 2;   // half pages allowed
+  if (form.readgoal.value !== "" && rp >= 0 && rp !== readPages()) {
+    progress.reading.pages = rp;
+    progress.reading.goalSet = nowS();
     saveSoon(500);
   }
   error("");
@@ -390,7 +499,8 @@ form.addEventListener("submit", () => {
     LS.set("ft.repo", repo);
     LS.set("ft.token", token);
     loadData();
-  } else if (!current) home();
+  } else if (!$("reader").hidden || !$("library").hidden) { /* stay in the book */ }
+  else if (!current) home();
   else renderCounts();
 });
 $("disconnect").addEventListener("click", () => {
@@ -398,6 +508,50 @@ $("disconnect").addEventListener("click", () => {
   dlg.close();
   words = []; sentences = {}; progressStore = null;
   renderCounts(); renderStages(); show("setup");
+});
+
+// ---------- books ----------
+
+/** A file from the data repo (books/...): GitHub (or ../french-data locally), with an offline copy in Cache Storage. */
+async function fetchFile(path) {
+  const cacheKey = `https://french-trainer.cache/${path}`;
+  const cache = typeof caches === "undefined" ? null : await caches.open("ft-books").catch(() => null);
+  try {
+    let doc;
+    if (LOCAL) {
+      const r = await fetch(`../french-data/${path}`, { cache: "no-store" });
+      doc = r.ok ? await r.json() : null;
+    } else {
+      const { repo, token } = config();
+      doc = await new GitHubStore({ repo, token, path }).loadRaw();
+    }
+    if (doc && cache) cache.put(cacheKey, new Response(JSON.stringify(doc))).catch(() => {});
+    return doc;
+  } catch (e) {
+    const hit = await cache?.match(cacheKey);
+    if (hit) return hit.json();
+    throw e;
+  }
+}
+
+/** Your own card for a word form in a book (or its lemma): word, stage and German gloss. */
+function ownCard(k, lemma) {
+  let id = byForm.get(k);
+  if (!id && lemma) id = byForm.get(formKey(lemma)) ?? byLemma.get(formKey(lemma))?.[0];
+  if (!id) id = byLemma.get(k)?.[0];
+  if (!id || !cards.has(id)) return null;
+  const s = sentences[id];
+  return { word: byId.get(id)?.word ?? k, stage: stage(id), gloss: s?.gloss ?? "", meanings: s?.meanings ?? [] };
+}
+
+initReader({
+  getReading: () => progress.reading,
+  save: () => saveSoon(),
+  readToday,
+  fetchFile,
+  ownCard,
+  show,
+  toHome,
 });
 
 if (LOCAL) window.__ft = { get target() { return target; }, get iter() { return iter; }, get card() { return cards.get(current); } };
