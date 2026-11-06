@@ -42,11 +42,17 @@ German translations: always the MOST DIRECT one. If German has (almost) the same
 (caractéristique -> Charakteristik, spécifications -> Spezifikationen, essentiel -> essenziell, agricole -> agrikulturell
 only if it is real German usage, otherwise landwirtschaftlich). Prefer cognates and word-for-word translations over
 idiomatic ones, as long as the German stays correct. Build each sentence so that this direct translation fits.
+Mirror the French grammar in the German so the form of the target is visible: same tense and mood
+(futur simple -> werden + Infinitiv, e.g. j'aurai -> ich werde ... haben; futur proche -> werden or gehen + zu only
+if natural, else werden; conditionnel -> würde / Konjunktiv II; passé composé -> Perfekt; imparfait -> Präteritum;
+plus-que-parfait -> Plusquamperfekt; subjonctif -> Konjunktiv where German allows it), same person and number,
+singular/plural and gender kept where German has them. Never replace a French future with a German present.
 For each word give: lemma, part of speech (noun/verb/adj/adv/pron/prep/conj/det/other), gender for nouns (m/f),
 "gloss": the direct German translation of the target as used, and "meanings": 2-5 other common German meanings
 of the lemma (not repeating the gloss; empty list if none).
-Per sentence: "de" = full German translation in which the German for the target is wrapped in [[ ]] (exactly one
-[[...]]), and "hint" = that German word or phrase (the text inside [[ ]], in the form used in the sentence).
+Per sentence: "de" = full German translation in which the German for the target is wrapped in [[ ]]. Usually one
+[[...]]; if the German form is split (werde ... haben, hat ... gesehen, ruft ... an), mark each part:
+"Morgen [[werde]] ich mehr Zeit für dich [[haben]]." "hint" = the German for the target as one phrase ("werde haben").
 
 Reply with JSON only, no prose, shaped:
 {{"<id>": {{"lemma": "...", "pos": "...", "gender": null, "gloss": "...", "meanings": ["..."],
@@ -75,13 +81,19 @@ def check(word, entry):
     """Keep sentences that contain the target as a whole word."""
     pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?![\w])", re.I)
     entry["sentences"] = [s for s in entry.get("sentences", [])
-                          if pat.search(s.get("fr", "")) and s.get("de", "").count("[[") == 1]
+                          if pat.search(s.get("fr", "")) and 1 <= s.get("de", "").count("[[") <= 3]
+    entry["v"] = VERSION
     return entry
 
 
+# format/rules version of an entry; older entries are redone first
+# 1: German + marked translation, 2: German mirrors French tense/mood, split forms marked in parts
+VERSION = 2
+
+
 def is_current(entry):
-    """Sentences in the current format (German, marked translation)."""
-    return bool(entry and entry.get("sentences") and "de" in entry["sentences"][0])
+    """Sentences made with the current rules."""
+    return bool(entry and entry.get("sentences") and entry.get("v", 1 if "de" in entry["sentences"][0] else 0) >= VERSION)
 
 
 def main():

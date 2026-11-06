@@ -215,7 +215,8 @@ function renderCard() {
   fitGap();
   $("gap").addEventListener("input", fitGap);
   // German translation with the target's translation marked [[...]] (older entries: plain English)
-  $("translation").innerHTML = sent.de ? esc(sent.de).replace(/\[\[(.+?)\]\]/, "<mark>$1</mark>") : esc(sent.en || "");
+  // split German forms are marked in parts: [[werde]] ... [[haben]]
+  $("translation").innerHTML = sent.de ? esc(sent.de).replace(/\[\[(.+?)\]\]/g, "<mark>$1</mark>") : esc(sent.en || "");
   const more = (s.meanings ?? []).filter(Boolean);
   $("meanings").textContent = more.length ? `auch: ${more.join(", ")}` : "";
   renderStage();
@@ -270,7 +271,7 @@ function check(revealed = false) {
     $("solution").hidden = true;
     const c = cards.get(current);
     const goalNow = !missed && doneToday() === goal() ? " · Daily goal reached!" : "";
-    feedback((missed ? "Now you have it. (doesn't count)"
+    feedback((missed ? ""
       : c.level < GRADUATE ? `Correct · ${c.level}/${GRADUATE} · again in ${LADDER[c.level]} cards`
       : `Correct · next in ${until(c.due)}`) + goalNow, "good");
     afterAnswer();
@@ -284,7 +285,7 @@ function check(revealed = false) {
   gap.value = "";
   fitGap();
   gap.classList.add("bad");
-  feedback(g === "accent" ? "Watch the accents. Type it once more." : "Type it once more.", "bad");
+  feedback(g === "accent" ? "Accents" : "", "bad");
   $("reveal").hidden = true;
   renderStage();
   gap.focus();
