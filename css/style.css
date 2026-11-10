@@ -94,8 +94,29 @@ button.danger { color: var(--bad); }
 .goal-bar.reached span { background: var(--good); }
 .session-bar { height: 4px; margin-bottom: 10px; }
 .days { display: grid; grid-template-columns: repeat(14, 1fr); gap: 4px; }
-.day { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: .7rem; color: var(--text-dim); }
-.day .box { width: 100%; aspect-ratio: 1; border-radius: 4px; background: var(--sec-border); position: relative; overflow: hidden; }
+.day { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: .7rem; color: var(--text-dim);
+  background: none; border: 0; padding: 0; min-height: 0; min-width: 0; cursor: pointer; font-family: inherit; }
+.day .box { display: block; width: 100%; aspect-ratio: 1; border-radius: 4px; background: var(--sec-border); position: relative; overflow: hidden; }
+.day.sel { color: var(--text); font-weight: 600; }
+.day.sel .box { outline: 2px solid var(--text); outline-offset: 1px; }
+.today-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.small-btn { min-height: 30px; padding: 2px 10px; font-size: .8rem; }
+#home.catching-up .today { border-style: dashed; }
+
+/* sync button (as in Fitness Assistant): dot + status; tap = sync now */
+.sync-status { display: block; border: 0; background: none; padding: 0 2px; min-height: 0; font-size: 12px; color: var(--text-dim);
+  text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 34%; cursor: pointer; }
+.sync-status::before { content: "●"; margin-right: 5px; color: var(--sec-border); }
+.sync-status[data-kind="ok"]::before { color: var(--text-mid); }
+.sync-status[data-kind="error"] { color: var(--text); font-weight: 600; }
+.sync-status[data-kind="error"]::before { content: "!"; color: var(--text); }
+.sync-status[aria-busy="true"]::before { animation: sync-pulse 1s ease-in-out infinite; }
+@keyframes sync-pulse { 50% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .sync-status[aria-busy="true"]::before { animation: none; } }
+@media (max-width: 560px) {
+  .sync-status { font-size: 0; padding: 8px; } /* just the dot; tap it to sync */
+  .sync-status::before { font-size: 12px; margin: 0; }
+}
 .day .box span { position: absolute; left: 0; right: 0; bottom: 0; background: var(--text-dim); }
 .day.reached .box span { background: var(--good); }
 .day.today .box { outline: 1px solid var(--text); outline-offset: 1px; }

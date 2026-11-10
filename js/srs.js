@@ -1,8 +1,9 @@
 // Scheduler: Lingvist-style learning ladder + FSRS-5 for long-term memory.
 //
 // Learning ladder (the "5 times right" part, like Lingvist's short steps):
-//   a card has a level 0..5. Right on the first try -> level + 1; a miss -> one level back (progress is
-//   kept, not reset), and the card comes back soon (after LADDER[0] cards). Shortcuts to level 5, as in Lingvist: right the very first time
+//   a card has a level 0..5. Right on the first try -> level + 1; a miss keeps the level (the counter is never
+//   reset; a long-term card that slips goes to 4, one right brings it back) and the card comes back soon
+//   (after LADDER[0] cards). Shortcuts to level 5, as in Lingvist: right the very first time
 //   the word is seen (already known), or right after a gap of a day or more (it held overnight).
 //   Below 5 the card comes back after LADDER[level] other cards (2, 4, 8, 16, 32: iterations, not minutes,
 //   like Memrise / Quizlet; Lingvist uses time, ×5 per step). Retyping after a miss never counts.
@@ -60,7 +61,7 @@ export function answer(c, ok, now, iter) {
     c.level = first || gap >= DAY ? GRADUATE : Math.min(c.level + 1, GRADUATE);
   } else {
     c.lapses++;
-    c.level = Math.max(0, Math.min(c.level, GRADUATE) - 1);   // one step back, not a reset
+    c.level = Math.min(c.level, GRADUATE - 1);   // the counter stays; a long-term card drops back into the ladder
   }
   c.miss = !ok;
   c.last = now;

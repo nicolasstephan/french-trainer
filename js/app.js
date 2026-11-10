@@ -37,6 +37,7 @@ async function loadData() {
     words = withExtra((await get("words.json"))?.words, (await get("extra_words.json"))?.words);
     sentences = (await get("sentences.json")) ?? {};
     progress = mergeProgress(null, LS.get("ft.progress"));
+    syncStatus("ok");
     start();
     return;
   }
@@ -52,10 +53,12 @@ async function loadData() {
     sentences = s ?? {};
     LS.set("ft.cache", { words, sentences });
     progress = mergeProgress(p, LS.get("ft.progress"));
+    syncStatus("ok");
   } catch (e) {
     const cache = LS.get("ft.cache");
     if (!cache) { error(e.message); show("setup"); return; }
     error(`Offline (${e.message}); using the copy on this device.`);
+    syncStatus("offline");
     ({ words, sentences } = cache);
     progress = mergeProgress(null, LS.get("ft.progress"));
   }
@@ -88,6 +91,12 @@ function mergeProgress(...srcs) {
 }
 
 function start() {
+  index();
+  home();
+}
+
+/** Lookup maps + scheduler state from words, sentences and the answer logs. */
+function index() {
   byId = new Map(words.map((w) => [w.id, w]));
   byLemma = new Map();
   byForm = new Map(words.map((w) => [formKey(w.word), w.id]));
@@ -100,7 +109,6 @@ function start() {
   // the reading goal counts from the first day this version runs (older days: cards only)
   if (!progress.reading.since) progress.reading.since = today();
   ({ cards, iter } = replayAll(Object.fromEntries(words.map((w) => [w.id, [...(w.history ?? []), ...(progress.log[w.id] ?? [])]]))));
-  home();
 }
 
 const stage = (id) => stageOf(cards.get(id));
@@ -112,31 +120,42 @@ const goal = () => progress.goal ?? DEFAULT_GOAL;
 /** Local calendar day of a unix time (s) as YYYY-MM-DD. */
 const dayKey = (t) => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const today = () => dayKey(nowS());
-/** Answers per day, counted from the app's answer log (so several devices add up). */
+// catching up: practice and reading are credited to this past day (tap it in "Last 14 days"); null = today
+let creditDay = null;
+const activeDay = () => creditDay ?? today();
+const dayLabel = (k) => new Date(`${k}T12:00`).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+/** Answers per day, counted from the app's answer log (so several devices add up).
+ *  A 3rd element is the day the answer was credited to (catching up), else the day it was given. */
 function dayCounts() {
   const n = {};
-  for (const log of Object.values(progress.log)) for (const [t] of log) { const k = dayKey(t); n[k] = (n[k] ?? 0) + 1; }
+  for (const log of Object.values(progress.log)) for (const [t, , day] of log) { const k = day ?? dayKey(t); n[k] = (n[k] ?? 0) + 1; }
   return n;
 }
-const doneToday = () => dayCounts()[today()] ?? 0;
+const doneToday = () => dayCounts()[activeDay()] ?? 0;
 // reading goal: set in pages (progress.reading.pages), counted in words (a page = PAGE_WORDS)
 const readPages = () => progress.reading.pages ?? DEFAULT_READ_PAGES;
 const readGoal = () => readPages() * PAGE_WORDS;
 const pagesOf = (w) => { const p = w / PAGE_WORDS; return p >= 10 || Number.isInteger(p) ? String(Math.round(p)) : p.toFixed(1); };
-const readToday = () => ({ n: readingDays(progress.reading, dayKey)[today()] ?? 0, goal: readGoal() });
+const readOn = (k) => readGoal() > 0 && k >= (progress.reading.since ?? k);
+const readToday = () => ({ n: readingDays(progress.reading, dayKey)[activeDay()] ?? 0, goal: readOn(activeDay()) ? readGoal() : 0 });
 /** Share of the day's goals done (0..1), the average of cards and reading; reached = both done. */
 function dayScore(k, counts, reads) {
   const c = Math.min(1, (counts[k] ?? 0) / goal());
-  const rg = readGoal(), readOn = rg > 0 && k >= (progress.reading.since ?? k);
-  if (!readOn) return { f: c, reached: c >= 1 };
+  const rg = readGoal();
+  if (!readOn(k)) return { f: c, reached: c >= 1 };
   const r = Math.min(1, (reads[k] ?? 0) / rg);
   return { f: (c + r) / 2, reached: c >= 1 && r >= 1 };
 }
 
 function home() {
   current = null;
-  const counts = dayCounts(), reads = readingDays(progress.reading, dayKey), g = goal(), n = counts[today()] ?? 0;
-  const rg = readGoal(), rn = reads[today()] ?? 0;
+  if (creditDay && (creditDay >= today() || creditDay < dayKey(nowS() - 13 * 86400))) creditDay = null;   // a new day began
+  const day = activeDay(), past = day !== today();
+  const counts = dayCounts(), reads = readingDays(progress.reading, dayKey), g = goal(), n = counts[day] ?? 0;
+  const rg = readOn(day) ? readGoal() : 0, rn = reads[day] ?? 0;
+  $("today-label").textContent = past ? `Catching up · ${dayLabel(day)}` : "Today";
+  $("today-back").hidden = !past;
+  $("home").classList.toggle("catching-up", past);
   $("today-n").textContent = n;
   $("today-goal").textContent = g;
   $("goal-fill").style.width = `${Math.min(100, (100 * n) / g)}%`;
@@ -148,16 +167,18 @@ function home() {
   $("read-fill").style.width = `${Math.min(100, (100 * rn) / (rg || 1))}%`;
   $("read-fill").parentElement.classList.toggle("reached", rn >= rg);
   const left = [n < g ? `${g - n} cards` : "", rg && rn < rg ? `${pagesOf(rg - rn)} page${rg - rn > PAGE_WORDS ? "s" : ""} of reading` : ""].filter(Boolean);
-  $("today-text").textContent = !left.length ? "Daily goal reached. Extra practice still counts."
-    : n || rn ? `${left.join(" and ")} to go.` : "Not started yet.";
+  $("today-text").textContent = (!left.length ? `Goal for ${past ? dayLabel(day) : "today"} reached.` + (past ? "" : " Extra practice still counts.")
+    : n || rn ? `${left.join(" and ")} to go.` : past ? "Nothing done that day yet." : "Not started yet.")
+    + (past ? " Practice and reading now count for that day." : "");
   // last 14 days, oldest first
   const days = [];
   for (let i = 13; i >= 0; i--) days.push(dayKey(nowS() - i * 86400));
   $("days").innerHTML = days.map((k) => {
     const c = counts[k] ?? 0, r = reads[k] ?? 0, sc = dayScore(k, counts, reads);
     const wd = new Date(`${k}T12:00`).toLocaleDateString([], { weekday: "narrow" });
-    return `<div class="day${sc.reached ? " reached" : ""}${k === today() ? " today" : ""}" title="${k}: ${c} / ${g} cards${r ? ` · ${pagesOf(r)} pages read` : ""}">`
-      + `<div class="box"><span style="height:${100 * sc.f}%"></span></div>${wd}</div>`;
+    return `<button type="button" class="day${sc.reached ? " reached" : ""}${k === today() ? " today" : ""}${k === day ? " sel" : ""}" data-day="${k}" `
+      + `title="${dayLabel(k)}: ${c} / ${g} cards${r ? ` · ${pagesOf(r)} pages read` : ""}${k === today() ? "" : " · tap to catch up"}">`
+      + `<span class="box"><span style="height:${100 * sc.f}%"></span></span>${wd}</button>`;
   }).join("");
   // streak: days in a row with the goal reached (today counts once reached, else the streak runs to yesterday)
   const ok = (i) => dayScore(dayKey(nowS() - i * 86400), counts, reads).reached;
@@ -171,7 +192,7 @@ function home() {
       + (cap.acc != null ? ` (${Math.round(100 * cap.acc)} % right first try, last ${RECENT})` : "")
       + (cap.reason && cap.reason !== "today's new words done" ? ` · now: ${cap.reason}` : "")
       + ` · ${cap.queued} queued`;
-  $("practice").textContent = n >= g ? "Practice more" : n ? `Continue · ${n} / ${g}` : "Practice";
+  $("practice").textContent = n >= g ? "Practice more" : n ? `Continue · ${n} / ${g}` : past ? `Practice for ${dayLabel(day)}` : "Practice";
   $("read").textContent = !rg || rn >= rg ? "Read" : rn ? `Read · ${pagesOf(rn)} / ${readPages()}` : "Read";
   renderCounts();
   renderStages();
@@ -188,8 +209,55 @@ async function saveNow() {
   clearTimeout(saveTimer);
   saveTimer = null;
   if (!progressStore) return;
-  try { await progressStore.save(progress, "Progress"); error(""); }
-  catch (e) { error(`Not synced: ${e.message}`); }
+  syncStatus("saving");
+  try { await progressStore.save(progress, "Progress"); error(""); syncStatus("ok"); }
+  catch (e) { syncStatus("error", e.message); }
+}
+
+// ---------- sync button (as in Fitness Assistant): status dot + text; tap = sync now ----------
+
+let lastSync = 0;
+function syncStatus(state, msg = "") {
+  const el = $("sync");
+  if (state === "ok") lastSync = Date.now();
+  const at = lastSync ? new Date(lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  el.dataset.kind = state === "ok" ? "ok" : state === "error" ? "error" : "";
+  el.setAttribute("aria-busy", String(state === "saving" || state === "syncing"));
+  el.textContent = LOCAL ? "Local test · this browser only"
+    : !progressStore ? "This device only · tap to connect"
+    : state === "error" ? `Not synced: ${msg}`
+    : state === "saving" ? "Saving…"
+    : state === "syncing" ? "Syncing…"
+    : state === "offline" ? "Offline · tap to retry"
+    : `Synced ${at}`;
+  el.title = el.textContent + (progressStore ? " · tap to sync now" : "");
+}
+
+/** Pull everything from GitHub (new words, sentences, progress from the phone), merge, push the merged progress. */
+async function syncNow() {
+  if (LOCAL) return;
+  if (!progressStore) { openSettings(); return; }
+  syncStatus("syncing");
+  const { repo, token } = config();
+  const store = (path) => new GitHubStore({ repo, token, path });
+  try {
+    const [w, x, s, p] = await Promise.all([store("words.json").loadRaw(), store("extra_words.json").loadRaw(),
+      store("sentences.json").loadRaw(), progressStore.load()]);
+    words = withExtra(w?.words, x?.words);
+    sentences = s ?? {};
+    LS.set("ft.cache", { words, sentences });
+    progress = mergeProgress(p, progress);
+    LS.set("ft.progress", progress);
+    await progressStore.save(progress, "Progress");
+    error("");
+    syncStatus("ok");
+  } catch (e) {
+    syncStatus("error", e.message);
+    return;
+  }
+  index();
+  if (!$("home").hidden) home();
+  else { renderCounts(); renderStages(); if (!$("words").hidden) renderWords(); }
 }
 
 // ---------- picking the next card ----------
@@ -338,7 +406,7 @@ function fitGap() {
 
 function record(ok) {
   const t = nowS();
-  (progress.log[current] ??= []).push([t, ok ? 1 : 0]);
+  (progress.log[current] ??= []).push(creditDay ? [t, ok ? 1 : 0, creditDay] : [t, ok ? 1 : 0]);
   answer(cards.get(current), ok, t, iter++);
   saveSoon();
   renderCounts();
@@ -419,7 +487,7 @@ function renderCounts() {
     else if (c.due <= now) due++;
   }
   const n = doneToday(), g = goal();
-  $("counts").textContent = words.length ? `${learning} learning · ${due} due · ${n}/${g} today` : "";
+  $("counts").textContent = words.length ? `${learning} learning · ${due} due · ${n}/${g} ${creditDay ? dayLabel(creditDay) : "today"}` : "";
   $("session-fill").style.width = `${Math.min(100, (100 * n) / g)}%`;
   $("session-fill").parentElement.classList.toggle("reached", n >= g);
 }
@@ -537,6 +605,14 @@ $("ahead").addEventListener("click", () => next(true));
 $("practice").addEventListener("click", () => next());
 $("read").addEventListener("click", () => openLibrary());
 $("words-btn").addEventListener("click", () => openWords());
+$("sync").addEventListener("click", () => syncNow());
+$("days").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-day]");
+  if (!b) return;
+  creditDay = b.dataset.day === today() || b.dataset.day === creditDay ? null : b.dataset.day;
+  home();
+});
+$("today-back").addEventListener("click", () => { creditDay = null; home(); });
 $("wl-home").addEventListener("click", () => home());
 const toHome = () => { if (words.length) { if (saveTimer) saveNow(); home(); } };
 for (const b of ["to-home", "done-home", "logo-home"]) $(b).addEventListener("click", toHome);
@@ -638,6 +714,7 @@ initReader({
   getReading: () => progress.reading,
   save: () => saveSoon(),
   readToday,
+  creditDay: () => creditDay,
   fetchFile,
   ownCard,
   show,

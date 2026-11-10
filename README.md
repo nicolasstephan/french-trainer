@@ -26,7 +26,7 @@ This repo is public and holds only code. Personal data lives in the private repo
 
 Lingvist-style learning ladder + FSRS-5 for long-term memory. Lingvist's own rules, read from the export (state per answer): a miss brings the word back after ~50 s, then each first-try correct multiplies the gap by 5 (25 s → 2 min → 10 min → 1 h → …); then a forgetting model targeting 80 % recall takes over; right at first sight → ~280 days.
 
-- **Ladder:** level 0–5, one pip per first-try correct; a miss (or Enter on an empty gap) → one level back, not a reset (a long-term card that slips → 4), and the card comes back after 2 cards. Retyping after a miss never counts. Steps are iterations, not minutes: the card comes back after 2, 4, 8, 16, 32 other cards (like Memrise / Quizlet; Lingvist uses time). Right at first sight, or right after ≥ 1 day → level 5 at once.
+- **Ladder:** level 0–5, one pip per first-try correct; a miss (or Enter on an empty gap) keeps the counter (never reset; a long-term card that slips → 4) and the card comes back after 2 cards. Retyping after a miss never counts. Steps are iterations, not minutes: the card comes back after 2, 4, 8, 16, 32 other cards (like Memrise / Quizlet; Lingvist uses time). Right at first sight, or right after ≥ 1 day → level 5 at once.
 - **In flight:** ladder cards answered within the last hour come back by iteration and go first; at most 8 at once, the gaps are filled with due reviews. Older half-learned cards wait with the reviews.
 - **Long term:** FSRS-5 (default parameters) updates stability S and difficulty D on every answer; next review when predicted recall drops to 90 %.
 - **Stages:** `new` (never right), `learning` (ladder), then by stability: `young` < 7 d, `familiar` < 30 d, `known` ≥ 30 d.
@@ -53,6 +53,8 @@ Read French books in the app; tap any word for its German translation. Reading c
 - **Tap a word:** the panel shows the glossary entry, your own card for that form or lemma (with its stage), the sentence, and a DeepL link for the whole sentence. Looked-up words get a dotted underline and are kept in `progress.json` (`reading.looked`) for new cards later.
 - **Pages:** about 220 words each, never across a chapter; swipe or ←/→ to turn, A−/A+ for the text size. Turning past a page marks it read. Its words count once (`reading.log`, `reading.books[id].read` ranges), so going back and re-reading doesn't count again.
 - **Daily goal:** cards plus reading, by default 60 cards + 3 pages. A page is 220 words: the reader counts words, the goal and home screen show pages (Settings: pages, half pages allowed, 0 = off). A day is reached when both goals are met; days before the reader existed count cards only. The 14-day boxes show the average of the two.
+- **Catching up:** tap a past day in *Last 14 days*: practice and reading now count for that day (answers carry the day as a 3rd element, reading log entries as a 5th; the scheduler still uses the real time). *Back to today* or tapping today ends it; a reload starts on today.
+- **Sync button** (header, as in Fitness Assistant): dot + status (synced at, saving, error); tap = pull words, sentences and progress from GitHub, merge with this device, push. On a phone only the dot shows.
 - Books and glossaries are fetched through the token like the other data and kept offline in Cache Storage (`ft-books`).
 
 ### New words (beyond Lingvist)

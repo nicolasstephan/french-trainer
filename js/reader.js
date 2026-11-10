@@ -76,7 +76,8 @@ function mergeRanges(rs) {
 /** Words read per local day, from the reading log. */
 export function readingDays(reading, dayKey) {
   const n = {};
-  for (const [t, , w] of reading?.log ?? []) { const k = dayKey(t); n[k] = (n[k] ?? 0) + w; }
+  // a 5th element is the day the page was credited to (catching up a past day), else the day it was read
+  for (const [t, , w, , day] of reading?.log ?? []) { const k = day ?? dayKey(t); n[k] = (n[k] ?? 0) + w; }
   return n;
 }
 
@@ -232,7 +233,8 @@ function turn(dir) {
     st.read = mergeRanges([...st.read, [pg.s, pg.e]]);
     if (fresh) {
       const before = ctx.readToday();
-      reading.log.push([nowS(), book.id, fresh, pg.s]);
+      const day = ctx.creditDay?.();
+      reading.log.push(day ? [nowS(), book.id, fresh, pg.s, day] : [nowS(), book.id, fresh, pg.s]);
       const after = ctx.readToday();
       if (after.goal && before.n < after.goal && after.n >= after.goal) toast("Daily reading goal reached!");
     }

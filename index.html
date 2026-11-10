@@ -19,6 +19,7 @@
   <header class="top">
     <button class="home-link" id="logo-home" aria-label="Menu"><img class="logo" src="icons/icon.svg" alt=""><h1>French Trainer</h1></button>
     <div class="counts" id="counts"></div>
+    <button id="sync" class="sync-status" type="button" title="Sync now"></button>
     <button id="settings-open" class="icon-btn" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
@@ -35,7 +36,8 @@
 
     <section id="home" hidden>
       <div class="card today">
-        <h2 class="hud-label">Today</h2>
+        <div class="today-head"><h2 class="hud-label" id="today-label">Today</h2>
+          <button type="button" class="ghost small-btn" id="today-back" hidden>Back to today</button></div>
         <p class="today-count"><span id="today-n">0</span> <span class="dim">/ <span id="today-goal">60</span> cards</span></p>
         <div class="goal-bar"><span id="goal-fill"></span></div>
         <div id="read-row">
@@ -46,7 +48,7 @@
         <p class="dim small" id="new-text"></p>
       </div>
       <div class="card">
-        <h2 class="hud-label">Last 14 days</h2>
+        <h2 class="hud-label">Last 14 days <span class="dim small">· tap a day to catch up</span></h2>
         <div class="days" id="days"></div>
         <p class="dim small" id="streak"></p>
       </div>
