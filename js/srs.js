@@ -1,8 +1,8 @@
 // Scheduler: Lingvist-style learning ladder + FSRS-5 for long-term memory.
 //
 // Learning ladder (the "5 times right" part, like Lingvist's short steps):
-//   a card has a level 0..5. Right on the first try -> level + 1; a miss -> level 0 (a known card that
-//   slips -> level 2, so it needs 3 more). Shortcuts to level 5, as in Lingvist: right the very first time
+//   a card has a level 0..5. Right on the first try -> level + 1; a miss -> one level back (progress is
+//   kept, not reset), and the card comes back soon (after LADDER[0] cards). Shortcuts to level 5, as in Lingvist: right the very first time
 //   the word is seen (already known), or right after a gap of a day or more (it held overnight).
 //   Below 5 the card comes back after LADDER[level] other cards (2, 4, 8, 16, 32: iterations, not minutes,
 //   like Memrise / Quizlet; Lingvist uses time, ×5 per step). Retyping after a miss never counts.
@@ -16,7 +16,7 @@
 
 export const DAY = 86400;
 export const LADDER = [2, 4, 8, 16, 32];   // cards in between until the next sighting at level 0..4
-export const GRADUATE = 5, RELEARN = 2;
+export const GRADUATE = 5;
 export const RETENTION = 0.9;
 const MAX_DAYS = 365;
 
@@ -47,7 +47,7 @@ function fsrs(c, g, now) {
 }
 
 // due: unix s (long term); dueIter: iteration (ladder)
-export const blank = () => ({ level: 0, s: 0, d: 0, last: 0, due: 0, dueIter: 0, reps: 0, lapses: 0, ok: 0 });
+export const blank = () => ({ miss: false, level: 0, s: 0, d: 0, last: 0, due: 0, dueIter: 0, reps: 0, lapses: 0, ok: 0 });
 
 /** Applies one answer (ok = right on the first try) at unix seconds `now`, as answer number `iter`. */
 export function answer(c, ok, now, iter) {
@@ -60,11 +60,12 @@ export function answer(c, ok, now, iter) {
     c.level = first || gap >= DAY ? GRADUATE : Math.min(c.level + 1, GRADUATE);
   } else {
     c.lapses++;
-    c.level = c.level >= GRADUATE ? RELEARN : 0;
+    c.level = Math.max(0, Math.min(c.level, GRADUATE) - 1);   // one step back, not a reset
   }
+  c.miss = !ok;
   c.last = now;
   if (c.level < GRADUATE) {
-    c.dueIter = iter + LADDER[c.level] + 1;
+    c.dueIter = iter + LADDER[ok ? c.level : 0] + 1;   // a missed card comes back soon
     c.due = now;                                          // ladder cards are due by iteration, not time
   } else {
     c.due = now + Math.min(Math.max(interval(c.s), 1), MAX_DAYS) * DAY;

@@ -114,6 +114,8 @@ def main():
                 g = gloss.get(k)
                 if k in ib.CORE or (g and g[1] == "name") or (f[0].isupper() and not forms.get(k)):
                     continue   # names (glossary or not a French word)
+                if not forms.get(k):
+                    continue   # not in Lexique 3: not a French word (hobbit, invented words); tap it instead
                 for lem in lemmas_of(f, gloss):
                     if lem in known or len(lem) < 2 or " " in lem:
                         continue
@@ -131,7 +133,7 @@ def main():
     tapped_lem = []
     for k in tapped:
         for lem in lemmas_of(k, gloss_all):
-            if lem not in known and lem not in tapped_lem:
+            if lem not in known and lem not in tapped_lem and forms.get(k):
                 tapped_lem.append(lem)
 
     freq = [l for l, (fl, cg) in sorted(lemmas.items(), key=lambda x: -x[1][0])

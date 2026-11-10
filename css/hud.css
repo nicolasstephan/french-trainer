@@ -16,6 +16,7 @@
 [data-style="hud"] .day { font-family: var(--mono); }
 [data-style="hud"] .practice-btn { font-size: 1rem; letter-spacing: .2em; }
 [data-style="hud"] .rd-ch, [data-style="hud"] .rd-meta, [data-style="hud"] .sheet-foot .chip { font-family: var(--mono); }
+[data-style="hud"] .wl-st, [data-style="hud"] .wl-when, [data-style="hud"] .wl-filter .chip { font-family: var(--mono); }
 [data-style="hud"] .book-title { font-family: var(--display); letter-spacing: .06em; }
 [data-style="hud"] .rd-top .icon-btn { font-family: var(--mono); font-size: .85rem; }
-[data-style="hud"] #read { font-family: var(--display); text-transform: uppercase; }
+[data-style="hud"] #read, [data-style="hud"] #words-btn { font-family: var(--display); text-transform: uppercase; }

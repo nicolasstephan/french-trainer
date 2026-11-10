@@ -118,6 +118,30 @@ input, select { font: inherit; font-size: 16px; padding: 8px 10px; background: v
 /* home: two goals, two buttons */
 .read-count { font-size: 1.5rem; margin: 14px 0 8px; }
 .home-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.home-actions #practice { grid-column: 1 / -1; }
+
+/* word list */
+#words { display: flex; flex-direction: column; gap: 12px; }
+#words h2 .dim { font-weight: 400; }
+.wl-tools { display: flex; gap: 8px; margin-bottom: 10px; }
+.wl-tools input { flex: 1 1 auto; min-width: 0; }
+.wl-tools select { flex: 0 1 auto; min-width: 0; max-width: 48%; }
+.wl-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.wl-filter .chip { font-size: .8rem; padding: 3px 10px; border: 1px solid var(--sec-border); border-radius: 99px;
+  background: transparent; color: var(--text-mid); min-height: 0; }
+.wl-filter .chip.on { border-color: var(--text); color: var(--text); }
+.wl-filter .chip i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+.wl-list { display: flex; flex-direction: column; }
+.wl-row { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 10px; padding: 7px 0;
+  border-top: 1px solid var(--sec-border); }
+.wl-row > i { width: 8px; height: 8px; border-radius: 50%; }
+.wl-row.off { opacity: .55; }
+.wl-main, .wl-side { display: flex; flex-direction: column; min-width: 0; }
+.wl-side { align-items: flex-end; text-align: right; }
+.wl-word { font-weight: 600; overflow-wrap: anywhere; }
+.wl-gloss, .wl-when { font-size: .8rem; color: var(--text-dim); }
+.wl-st { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+.wl-pips { letter-spacing: 0; }
 
 /* library */
 #library, #reader { display: flex; flex-direction: column; gap: 12px; }

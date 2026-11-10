@@ -53,7 +53,29 @@
       <div class="home-actions">
         <button class="primary practice-btn" id="practice">Practice</button>
         <button class="practice-btn" id="read">Read</button>
+        <button class="practice-btn" id="words-btn">Words</button>
       </div>
+    </section>
+
+    <section id="words" hidden>
+      <div class="card">
+        <h2 class="hud-label">Words <span class="dim" id="wl-count"></span></h2>
+        <div class="wl-tools">
+          <input id="wl-search" type="search" placeholder="Search French or German" autocomplete="off" aria-label="Search">
+          <select id="wl-sort" aria-label="Sort">
+            <option value="status">Status, weakest first</option>
+            <option value="alpha">A–Z</option>
+            <option value="due">Next review</option>
+            <option value="missed">Most missed</option>
+            <option value="recent">Last practiced</option>
+            <option value="queue">New-word queue</option>
+          </select>
+          <button type="button" class="ghost" id="wl-dir" title="Reverse order" aria-label="Reverse order">↓</button>
+        </div>
+        <div class="wl-filter" id="wl-filter"></div>
+        <div class="wl-list" id="wl-list"></div>
+      </div>
+      <div class="actions"><button type="button" class="ghost" id="wl-home">Menu</button><span class="spacer"></span></div>
     </section>
 
     <section id="library" hidden>

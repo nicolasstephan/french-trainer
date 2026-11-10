@@ -212,7 +212,7 @@ function newToday() {
 
 /** How many new words today, and whether one may come now.
  *  Budget: maxNew × f, f from first-try accuracy over the last RECENT answers (75 % → 0, 90 % → full).
- *  Not now while: 3+ words in training were just missed (level 0), the ladder is nearly full, or > 15 reviews are due.
+ *  Not now while: 3+ words in training were just missed, the ladder is nearly full, or > 15 reviews are due.
  *  Pace: new words are spread over the day's goal instead of coming in a burst. */
 function newWordCapacity() {
   const now = nowS();
@@ -223,7 +223,7 @@ function newWordCapacity() {
   const ids = playable();
   const c = (id) => cards.get(id);
   const training = ids.filter((id) => c(id).level < GRADUATE && c(id).reps > 0 && now - c(id).last < SESSION);
-  const struggling = training.filter((id) => c(id).level === 0).length;
+  const struggling = training.filter((id) => c(id).miss).length;
   const due = ids.filter((id) => c(id).level >= GRADUATE && c(id).due <= now).length;
   const queued = ids.filter(unseen).length;
   let reason = "";
@@ -433,12 +433,100 @@ function renderStages() {
     + `<span>sentences ${Object.keys(sentences).length}/${words.length}</span>`;
 }
 
+// ---------- word list: every card with its status, sortable ----------
+
+const STATUS = ["queued", ...STAGES];   // queued = new word waiting in extra_words.json, not seen yet
+const statusOf = (id) => (unseen(id) && byId.get(id)?.extra ? "queued" : stage(id));
+const stColor = (st) => `var(--st-${st === "queued" ? "new" : st})`;
+const wl = { sort: LS.get("ft.wlSort", "status"), rev: false, filter: new Set(), q: "" };
+const WL_MAX = 600;
+
+function ago(t) {
+  const s = nowS() - t;
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+
+function wordRows() {
+  return words.map((w) => {
+    const c = cards.get(w.id), s = sentences[w.id] ?? {}, st = statusOf(w.id);
+    let when;
+    if (st === "queued") when = `queue #${w.rank ?? "?"}`;
+    else if (!s.sentences?.length) when = "no sentence yet";
+    else if (!c.reps) when = "not practiced";
+    else if (c.level < GRADUATE) when = c.dueIter <= iter ? "due now" : `in ${c.dueIter - iter} cards`;
+    else when = c.due <= nowS() ? "due now" : `in ${until(c.due)}`;
+    return { w: w.word, gloss: s.gloss ?? "", lemma: s.lemma ?? "", st, c, fails: c.reps - c.ok, when,
+      playable: !!s.sentences?.length, rank: w.rank ?? 1e9 };
+  });
+}
+
+function openWords() {
+  $("wl-sort").value = wl.sort;
+  renderWords();
+  show("words");
+}
+
+function renderWords() {
+  const all = wordRows();
+  const n = Object.fromEntries(STATUS.map((s) => [s, 0]));
+  for (const r of all) n[r.st]++;
+  $("wl-filter").innerHTML = STATUS.filter((s) => n[s]).map((s) =>
+    `<button type="button" class="chip${wl.filter.has(s) ? " on" : ""}" data-st="${s}" aria-pressed="${wl.filter.has(s)}">`
+    + `<i style="background:${stColor(s)}"></i>${s} ${n[s]}</button>`).join("");
+  const q = wl.q.trim().toLowerCase();
+  const rows = all.filter((r) => (!wl.filter.size || wl.filter.has(r.st))
+    && (!q || r.w.toLowerCase().includes(q) || r.gloss.toLowerCase().includes(q) || r.lemma.toLowerCase().includes(q)));
+  const alpha = (a, b) => a.w.localeCompare(b.w, "fr");
+  // weakest first: never right, then the ladder by level, then long term by stability; queued words last
+  const strength = (r) => r.st === "queued" ? 99 : r.st === "new" ? 0 : r.st === "learning" ? 1 + r.c.level / 10 : 2 + r.c.s / 1000;
+  const due = (r) => r.st === "queued" || !r.c.reps ? Infinity : r.c.level < GRADUATE ? nowS() + (r.c.dueIter - iter) : r.c.due;
+  const rate = (r) => (r.c.reps ? r.fails / r.c.reps : 0);
+  rows.sort({
+    status: (a, b) => b.playable - a.playable || strength(a) - strength(b) || b.fails - a.fails || alpha(a, b),
+    alpha,
+    due: (a, b) => b.playable - a.playable || due(a) - due(b) || alpha(a, b),
+    missed: (a, b) => b.fails - a.fails || rate(b) - rate(a) || alpha(a, b),
+    recent: (a, b) => b.c.last - a.c.last || alpha(a, b),
+    queue: (a, b) => (a.st === "queued" ? 0 : 1) - (b.st === "queued" ? 0 : 1) || a.rank - b.rank || alpha(a, b),
+  }[wl.sort] ?? alpha);
+  if (wl.rev) rows.reverse();
+  $("wl-dir").textContent = wl.rev ? "↑" : "↓";
+  $("wl-count").textContent = rows.length === all.length ? `· ${all.length}` : `· ${rows.length} of ${all.length}`;
+  const info = (r) => wl.sort === "recent" ? (r.c.reps ? ago(r.c.last) : "never")
+    : wl.sort === "missed" ? `missed ${r.fails}×` : r.when;
+  $("wl-list").innerHTML = rows.slice(0, WL_MAX).map((r) => {
+    const col = stColor(r.st);
+    const pips = r.st === "learning" || (r.st === "new" && r.c.reps)
+      ? ` <span class="wl-pips">${"●".repeat(r.c.level)}${"○".repeat(GRADUATE - r.c.level)}</span>` : "";
+    const tip = `${r.c.reps} answers, ${r.c.ok} right first try` + (r.c.reps ? `, last ${ago(r.c.last)}` : "")
+      + (r.c.level >= GRADUATE ? `, stability ${r.c.s.toFixed(1)} days` : "") + (r.playable ? "" : " · no sentence yet, not in practice");
+    return `<div class="wl-row${r.playable ? "" : " off"}" title="${esc(tip)}"><i style="background:${col}"></i>`
+      + `<div class="wl-main"><span class="wl-word">${esc(r.w)}</span><span class="wl-gloss">${esc(r.gloss)}</span></div>`
+      + `<div class="wl-side"><span class="wl-st" style="color:${col}">${r.st}${pips}</span>`
+      + `<span class="wl-when">${esc(info(r))}${r.c.reps ? ` · ${r.c.ok}/${r.c.reps} right` : ""}</span></div></div>`;
+  }).join("")
+    + (rows.length > WL_MAX ? `<p class="dim small">First ${WL_MAX} of ${rows.length}: search or filter to narrow down.</p>` : "")
+    + (!rows.length ? `<p class="dim small">No words match.</p>` : "");
+}
+
+$("wl-filter").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-st]");
+  if (!b) return;
+  if (wl.filter.has(b.dataset.st)) wl.filter.delete(b.dataset.st); else wl.filter.add(b.dataset.st);
+  renderWords();
+});
+$("wl-sort").addEventListener("change", (e) => { wl.sort = e.target.value; wl.rev = false; LS.set("ft.wlSort", wl.sort); renderWords(); });
+$("wl-dir").addEventListener("click", () => { wl.rev = !wl.rev; renderWords(); });
+$("wl-search").addEventListener("input", (e) => { wl.q = e.target.value; renderWords(); });
+
 // ---------- ui ----------
 
 function show(id) {
-  for (const s of ["setup", "loading", "home", "trainer", "done", "library", "reader"]) $(s).hidden = s !== id;
+  for (const s of ["setup", "loading", "home", "trainer", "done", "library", "reader", "words"]) $(s).hidden = s !== id;
   if (id !== "reader") $("sheet").hidden = true;
-  document.querySelector(".stages").hidden = id === "reader" || id === "library";
+  document.querySelector(".stages").hidden = id === "reader" || id === "library" || id === "words";
 }
 function error(msg) { $("error").textContent = msg; $("error").hidden = !msg; }
 
@@ -448,6 +536,8 @@ $("reveal").addEventListener("click", () => check(true));
 $("ahead").addEventListener("click", () => next(true));
 $("practice").addEventListener("click", () => next());
 $("read").addEventListener("click", () => openLibrary());
+$("words-btn").addEventListener("click", () => openWords());
+$("wl-home").addEventListener("click", () => home());
 const toHome = () => { if (words.length) { if (saveTimer) saveNow(); home(); } };
 for (const b of ["to-home", "done-home", "logo-home"]) $(b).addEventListener("click", toHome);
 document.addEventListener("keydown", (e) => {

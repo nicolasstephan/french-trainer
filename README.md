@@ -26,7 +26,7 @@ This repo is public and holds only code. Personal data lives in the private repo
 
 Lingvist-style learning ladder + FSRS-5 for long-term memory. Lingvist's own rules, read from the export (state per answer): a miss brings the word back after ~50 s, then each first-try correct multiplies the gap by 5 (25 s → 2 min → 10 min → 1 h → …); then a forgetting model targeting 80 % recall takes over; right at first sight → ~280 days.
 
-- **Ladder:** level 0–5, one pip per first-try correct; a miss (or Enter on an empty gap) → 0 (a long-term card that slips → 2). Retyping after a miss never counts. Steps are iterations, not minutes: the card comes back after 2, 4, 8, 16, 32 other cards (like Memrise / Quizlet; Lingvist uses time). Right at first sight, or right after ≥ 1 day → level 5 at once.
+- **Ladder:** level 0–5, one pip per first-try correct; a miss (or Enter on an empty gap) → one level back, not a reset (a long-term card that slips → 4), and the card comes back after 2 cards. Retyping after a miss never counts. Steps are iterations, not minutes: the card comes back after 2, 4, 8, 16, 32 other cards (like Memrise / Quizlet; Lingvist uses time). Right at first sight, or right after ≥ 1 day → level 5 at once.
 - **In flight:** ladder cards answered within the last hour come back by iteration and go first; at most 8 at once, the gaps are filled with due reviews. Older half-learned cards wait with the reviews.
 - **Long term:** FSRS-5 (default parameters) updates stability S and difficulty D on every answer; next review when predicted recall drops to 90 %.
 - **Stages:** `new` (never right), `learning` (ladder), then by stability: `young` < 7 d, `familiar` < 30 d, `known` ≥ 30 d.
@@ -34,9 +34,15 @@ Lingvist-style learning ladder + FSRS-5 for long-term memory. Lingvist's own rul
 - Order: in-flight ladder cards whose turn has come, then due reviews / waiting cards (oldest first), then the in-flight card whose turn comes next (no waiting).
 - Local test: serve `D:\work\private` and open `/French%20Trainer/?local`; `window.__ft` exposes the current target, card and iteration.
 
+### Word list
+
+Menu → **Words**: every card with its status (queued, new, learning with its pips, young, familiar, known), the next review and how often it was right first try. Sort by status (weakest first), A–Z, next review, most missed, last practiced, or the new-word queue (↓/↑ reverses); filter by status, search French or German. Words without a sentence yet are dimmed (not in practice); hover a row for details.
+
 ### Sentences
 
-`python tools/make_sentences.py [--limit N] [--redo w1,w2]` runs headless Claude Code (`claude -p`, no API key), 25 words per batch, level by stage, the rest of each sentence preferably from known words. Resumable: only words without sentences are done.
+`python tools/make_sentences.py [--limit N] [--redo w1,w2] [--push]` runs headless Claude Code (`claude -p`, no API key) with **Sonnet** (`--model`), 60 words per call, 3 calls at a time (`--batch`, `--jobs`; ~3 min per batch), level by stage, the rest of each sentence preferably from known words. Order: learning, new, young, familiar, known, and within a stage what Lingvist had due first. Resumable: every batch is saved at once; only words without sentences are done; failed batches are retried next run. `--push` commits and pushes `sentences.json` after each batch, so the phone gets the words as they come.
+
+**In the background:** `powershell -File tools\sentences_task.ps1 -Register` (once) adds the Windows task *French Trainer sentences*: daily at 13:00 and 5 min after logon, a missed run starts when the laptop is available again; it runs only while you are logged on (it uses your Claude Code login) and exits at once when nothing is missing. Log: `french-data/imports/logs/sentences.log`. `-Unregister` removes it.
 
 ### Reader
 
@@ -61,6 +67,6 @@ Lexique 3 (`imports/lexique/Lexique383.tsv`, 25 MB, local only) comes from http:
 
 **When a new word comes is decided by the app** (`newWordCapacity` in `js/app.js`), based on how well you're doing:
 - **Budget per day:** "new words per day" (Settings, default 15) × f. f comes from your first-try rate over the last 50 answers: 75 % → 0, 90 % → full, linear in between (2/3 with fewer than 15 answers).
-- **Not now while:** 3 or more words in training were just missed (level 0), the ladder has 6 of its 8 slots in use, or more than 15 reviews are due. The words you're struggling with come first.
+- **Not now while:** 3 or more words in training were just missed (last answer wrong), the ladder has 6 of its 8 slots in use, or more than 15 reviews are due. The words you're struggling with come first.
 - **Pace:** new words are spread over the day's card goal (by card 30 of 60, at most half the budget), and they take a slot only when nothing else is waiting.
 - The home screen shows "New words today: x / budget", your first-try rate, and why no new word is coming right now.
