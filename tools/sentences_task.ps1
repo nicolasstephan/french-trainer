@@ -1,4 +1,5 @@
-# Generates missing cloze sentences in the background and pushes them to french-data (the phone gets them on its next load).
+# Turns words you added in the reader into cards, then generates missing cloze sentences (at most 120 words a run,
+# one batch at a time) and pushes both to french-data (the phone gets them on its next load or sync).
 #
 #   powershell -File tools\sentences_task.ps1 -Register     # once: Windows task, daily at 13:00 and at every logon
 #   powershell -File tools\sentences_task.ps1               # run now (what the task runs)
@@ -41,5 +42,6 @@ $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $py) { "$(Get-Date -Format s) python not found" | Out-File $log -Append -Encoding utf8; exit 1 }
 "--- $(Get-Date -Format s) start" | Out-File $log -Append -Encoding utf8
 & git -C $Data pull -q --ff-only 2>&1 | Out-File $log -Append -Encoding utf8
-& $py (Join-Path $Tools "make_sentences.py") --push 2>&1 | Out-File $log -Append -Encoding utf8
+& $py (Join-Path $Tools "add_words.py") --tapped-only --no-sentences --push 2>&1 | Out-File $log -Append -Encoding utf8
+& $py (Join-Path $Tools "make_sentences.py") --limit 120 --push 2>&1 | Out-File $log -Append -Encoding utf8
 "--- $(Get-Date -Format s) end" | Out-File $log -Append -Encoding utf8

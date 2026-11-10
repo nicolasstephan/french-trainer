@@ -13,7 +13,8 @@ translation marked [[like this]] in "de", plus other meanings of the word.
     python tools/make_sentences.py --push          # commit + push sentences.json after every batch (scheduled job)
 
 Model: Sonnet by default (--model; same quality for this job at a fraction of Opus's usage). Batches of 60 words,
-3 at a time (--batch, --jobs). Each finished batch is saved at once, so an interrupted run loses nothing.
+one at a time with a pause in between (--batch, --jobs, --pause), so a run doesn't eat the whole usage allowance;
+a usage-limit error stops the run (the rest waits for the next one). Each finished batch is saved at once.
 Scheduled: tools/sentences_task.ps1 registers a daily Windows task that runs this with --push.
 
 Difficulty follows the stage: new/learning words get short, simple sentences built from
@@ -25,13 +26,15 @@ import random
 import re
 import shutil
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 PER_WORD = 3
 BATCH = 60
-JOBS = 3
+JOBS = 1
+PAUSE = 60            # seconds between batches
 MODEL = "sonnet"
 LEVEL = {
     "new": "A2: short (6-10 words), present or passé composé, everyday context",
@@ -116,6 +119,7 @@ def main():
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--batch", type=int, default=BATCH, help="words per call")
     ap.add_argument("--jobs", type=int, default=JOBS, help="calls at the same time")
+    ap.add_argument("--pause", type=int, default=PAUSE, help="seconds between batches")
     ap.add_argument("--push", action="store_true", help="commit and push sentences.json after every batch")
     args = ap.parse_args()
     data = Path(args.data)
@@ -144,21 +148,31 @@ def main():
 
     batches = [todo[i:i + args.batch] for i in range(0, len(todo), args.batch)]
 
-    def run(batch):
+    stop = threading.Event()   # set on a usage-limit error: the remaining batches wait for the next run
+
+    def run(batch, n):
+        if n > 1 and args.pause:
+            time.sleep(args.pause)
+        if stop.is_set():
+            raise RuntimeError("skipped (usage limit)")
         lines = "\n".join(f"{w['id']} | {w['word']} | {LEVEL[w['stage']]}" for w in batch)
         prompt = PROMPT.format(n=PER_WORD, known=", ".join(random.sample(known, min(150, len(known)))), words=lines)
         return ask_claude(prompt, args.model)
 
     t0, failed = time.time(), 0
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        futs = {pool.submit(run, b): n for n, b in enumerate(batches, 1)}
+        futs = {pool.submit(run, b, n): n for n, b in enumerate(batches, 1)}
         for fut in as_completed(futs):   # results are merged here, one at a time
             n, batch = futs[fut], batches[futs[fut] - 1]
             try:
                 res = fut.result()
             except Exception as e:  # keep going; the next run retries these
                 failed += 1
-                print(f"batch {n}/{len(batches)}: failed ({str(e)[:200]})", flush=True)
+                if re.search(r"limit|usage|quota|rate", str(e), re.I) and not stop.is_set():
+                    stop.set()
+                    print(f"batch {n}/{len(batches)}: usage limit reached, stopping ({str(e)[:200]})", flush=True)
+                elif not stop.is_set():
+                    print(f"batch {n}/{len(batches)}: failed ({str(e)[:200]})", flush=True)
                 continue
             got = 0
             for w in batch:
@@ -176,10 +190,10 @@ def main():
     print(f"done: {len(out)} words have sentences" + (f", {failed} batches failed (retried next run)" if failed else ""))
 
 
-def push(data, msg):
-    """Commit sentences.json and push; the app writes only progress.json, so a rebase never conflicts."""
+def push(data, msg, path="sentences.json"):
+    """Commit one data file and push; the app writes only progress.json, so a rebase never conflicts."""
     git = ["git", "-C", str(data)]
-    subprocess.run(git + ["add", "sentences.json"], check=False)
+    subprocess.run(git + ["add", path], check=False)
     if subprocess.run(git + ["diff", "--cached", "--quiet"]).returncode == 0:
         return
     subprocess.run(git + ["commit", "-q", "-m", msg], check=False)

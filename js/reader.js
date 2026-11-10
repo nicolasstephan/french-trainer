@@ -40,7 +40,8 @@ const countWords = (text) => tokens(text).length;
 
 // ---------- reading progress (inside progress.json) ----------
 
-export function emptyReading() { return { log: [], books: {}, looked: {} }; }
+export function emptyReading() { return { log: [], books: {}, looked: {}, added: {} }; }
+const ADD_AFTER = 2;   // looking a word up this often adds it to the cards
 
 /** Union of reading logs; per book the latest position wins and read ranges are merged. */
 export function mergeReading(a, b) {
@@ -57,6 +58,7 @@ export function mergeReading(a, b) {
       if ((bk.at ?? 0) >= o.at) { o.pos = bk.pos ?? 0; o.at = bk.at ?? 0; }
       o.read = mergeRanges([...o.read, ...(bk.read ?? [])]);
     }
+    for (const [k, v] of Object.entries(src.added ?? {})) if (!out.added[k] || v[0] < out.added[k][0]) out.added[k] = v;
     for (const [k, [n, t]] of Object.entries(src.looked ?? {})) {
       const o = out.looked[k];
       out.looked[k] = o ? [Math.max(o[0], n), Math.max(o[1], t)] : [n, t];
@@ -96,6 +98,7 @@ export function initReader(c) {
   $("rd-lib").addEventListener("click", () => { closeSheet(); openLibrary(); });
   $("rd-prev").addEventListener("click", () => turn(-1));
   $("rd-next").addEventListener("click", () => turn(1));
+  $("sheet-own").addEventListener("click", (e) => { if (e.target.closest("#sheet-add")) addWord(); });
   $("rd-chapter").addEventListener("change", (e) => { closeSheet(); goPara(Number(e.target.value)); });
   $("rd-smaller").addEventListener("click", () => fontSize(-1));
   $("rd-bigger").addEventListener("click", () => fontSize(1));
@@ -274,20 +277,41 @@ function onTap(e) {
   const l = reading.looked[k];
   reading.looked[k] = [(l?.[0] ?? 0) + 1, nowS()];
   w.classList.add("looked");
+  const lemma = g && g[0] && key(g[0]) !== k ? g[0] : "";
+  sheetWord = { k, lemma: g?.[0] || form, name: g?.[1] === "name" || /^[IVXLCDM]+$/.test(form) };   // names, chapter numbers: no card
+  // the 2nd lookup adds the word to the cards
+  if (!own && !sheetWord.name && reading.looked[k][0] >= ADD_AFTER && !isAdded(k)) addWord(true);
   ctx.save();
 
-  const lemma = g && g[0] && key(g[0]) !== k ? g[0] : "";
   $("sheet-word").textContent = form;
   $("sheet-lemma").textContent = [lemma, g?.[1]].filter(Boolean).join(" · ");
   $("sheet-gloss").textContent = g?.[2] || own?.gloss || "";
   $("sheet-other").textContent = g?.[3] ? `auch: ${g[3]}` : own?.meanings?.length ? `auch: ${own.meanings.join(", ")}` : "";
   $("sheet-none").hidden = !!(g?.[2] || own?.gloss);
-  $("sheet-own").innerHTML = own
-    ? `<span class="chip"><i style="background:var(--st-${own.stage})"></i>${esc(own.word)} · ${own.stage}</span>`
-    : `<span class="dim small">Not in your cards</span>`;
+  renderOwn(own);
   $("sheet-sentence").innerHTML = esc(sentence.text.slice(0, sentence.a)) + `<mark>${esc(form)}</mark>` + esc(sentence.text.slice(sentence.a + form.length));
   $("sheet-deepl").href = `https://www.deepl.com/translator#fr/de/${encodeURIComponent(sentence.text)}`;
   $("sheet").hidden = false;
+}
+
+let sheetWord = null;   // { k, lemma, name } of the word in the sheet
+const isAdded = (k) => !!(ctx.getReading().added ??= {})[k];
+
+/** Card status in the sheet: own card, added (cards come once its sentences are made), or the Add button. */
+function renderOwn(own) {
+  $("sheet-own").innerHTML = own
+    ? `<span class="chip"><i style="background:var(--st-${own.stage})"></i>${esc(own.word)} · ${own.stage === "queued" ? "added, sentences coming" : own.stage}</span>`
+    : sheetWord.name ? `<span class="dim small">Name, no card</span>`
+    : isAdded(sheetWord.k) ? `<span class="added">✓ Added to your cards</span>`
+    : `<button type="button" class="ghost small-btn" id="sheet-add">Add to my cards</button>`;
+}
+
+function addWord(auto = false) {
+  const reading = ctx.getReading();
+  (reading.added ??= {})[sheetWord.k] = [nowS(), sheetWord.lemma, book?.id ?? ""];
+  ctx.save();
+  renderOwn(null);
+  toast(auto ? "Looked up twice: added to your cards" : "Added to your cards");
 }
 
 function sentenceAt(text, a, b) {

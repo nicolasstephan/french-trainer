@@ -3,10 +3,11 @@
     python tools/add_words.py              # 40 new words, then sentences for them
     python tools/add_words.py --n 60 --dry # show what would be added
     python tools/add_words.py --no-sentences
+    python tools/add_words.py --tapped-only --push # only the words added in the reader; commit + push (scheduled task)
 
 The app decides WHEN a queued word is introduced (js/app.js: newWordCapacity, by how well you are doing);
 this tool decides WHICH words wait in the queue, in this order:
-  1. words you tapped in the reader at least twice (progress.json reading.looked),
+  1. words you added in the reader (button, or looked up twice: progress.json reading.added / reading.looked),
   2. words from the coming pages of the book you read last: the next AHEAD_PAGES pages after your position,
      ranked by how often they occur from there to the end (rare words: tap them, no card),
   3. only when 1 and 2 run out: frequent everyday words (Lexique 3 lemma frequencies, films + books).
@@ -59,6 +60,8 @@ def main():
     ap.add_argument("--book", help="book id (default: the one read last)")
     ap.add_argument("--dry", action="store_true", help="only show the candidates")
     ap.add_argument("--no-sentences", action="store_true")
+    ap.add_argument("--tapped-only", action="store_true", help="only words added in the reader (no book / frequency words)")
+    ap.add_argument("--push", action="store_true", help="commit and push extra_words.json (and sentences)")
     args = ap.parse_args()
     data = Path(args.data)
 
@@ -130,6 +133,7 @@ def main():
 
     tapped = [ib.key(k) for k, (n, _) in sorted(reading.get("looked", {}).items(), key=lambda x: -x[1][1])
               if n >= TAPPED_MIN]
+    tapped = list(dict.fromkeys([ib.key(k) for k in reading.get("added", {})] + tapped))   # "Add to my cards" first
     tapped_lem = []
     for k in tapped:
         for lem in lemmas_of(k, gloss_all):
@@ -147,9 +151,9 @@ def main():
             src[l] = s
     for l in tapped_lem:
         take(l, "tapped")
-    for l in book_cands:
+    for l in [] if args.tapped_only else book_cands:
         take(l, f"book:{book_id}")
-    for l in freq:
+    for l in [] if args.tapped_only else freq:
         if len(picked) >= args.n:
             break
         take(l, "freq")
@@ -168,8 +172,12 @@ def main():
     extra["words"].extend(new)
     ib.save(xpath, extra, indent=1)
     print(f"{len(new)} words added, queue {len(extra['words'])}")
+    if args.push:
+        import make_sentences as ms
+        ms.push(data, f"Queue: +{len(new)} words", "extra_words.json")
     if not args.no_sentences:
-        subprocess.run([sys.executable, str(Path(__file__).with_name("make_sentences.py")), "--extra"], check=False)
+        subprocess.run([sys.executable, str(Path(__file__).with_name("make_sentences.py")), "--extra"]
+                       + (["--push"] if args.push else []), check=False)
 
 
 if __name__ == "__main__":

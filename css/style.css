@@ -185,7 +185,9 @@ input, select { font: inherit; font-size: 16px; padding: 8px 10px; background: v
 @media (hover: hover) { .rd-text .w:hover { background: var(--btn-hover); } .rd-text .w.on:hover { background: var(--text); } }
 .rd-meta { margin: 0; text-align: center; font-variant-numeric: tabular-nums; }
 .rd-toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
-  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; margin: 0; z-index: 30; }
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; margin: 0; z-index: 30;
+  width: max-content; max-width: calc(100vw - 32px); text-align: center; }
+.sheet-foot .added { font-size: .85rem; color: var(--good); }
 button:disabled { opacity: .4; cursor: default; }
 
 /* word sheet: bottom panel on the phone, card bottom-right on wide screens */

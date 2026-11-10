@@ -405,11 +405,23 @@ function fitGap() {
 }
 
 function record(ok) {
-  const t = nowS();
+  const t = nowS(), before = doneToday();
   (progress.log[current] ??= []).push(creditDay ? [t, ok ? 1 : 0, creditDay] : [t, ok ? 1 : 0]);
   answer(cards.get(current), ok, t, iter++);
   saveSoon();
   renderCounts();
+  if (before < goal() && doneToday() >= goal()) {
+    const { n, goal: rg } = readToday();
+    toast(`Daily vocabulary goal reached: ${goal()} cards!` + (rg && n < rg ? ` Now ${pagesOf(rg - n)} pages of reading.` : rg ? " Reading done too: day complete." : ""));
+  }
+}
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { t.hidden = true; }, 4000);
 }
 
 function check(revealed = false) {
@@ -429,7 +441,7 @@ function check(revealed = false) {
     gap.readOnly = true;
     $("solution").hidden = true;
     const c = cards.get(current);
-    const goalNow = !missed && doneToday() === goal() ? " · Daily goal reached!" : "";
+    const goalNow = !missed && doneToday() === goal() ? " · Daily goal reached!" : "";   // + toast in record()
     feedback((missed ? ""
       : c.level < GRADUATE ? `Correct · ${c.level}/${GRADUATE} · again in ${LADDER[c.level]} cards`
       : `Correct · next in ${until(c.due)}`) + goalNow, "good");
@@ -707,7 +719,8 @@ function ownCard(k, lemma) {
   if (!id) id = byLemma.get(k)?.[0];
   if (!id || !cards.has(id)) return null;
   const s = sentences[id];
-  return { word: byId.get(id)?.word ?? k, stage: stage(id), gloss: s?.gloss ?? "", meanings: s?.meanings ?? [] };
+  const queued = byId.get(id)?.extra && !cards.get(id).reps;
+  return { word: byId.get(id)?.word ?? k, stage: queued ? "queued" : stage(id), gloss: s?.gloss ?? "", meanings: s?.meanings ?? [] };
 }
 
 initReader({
