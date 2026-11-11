@@ -1,6 +1,7 @@
 // Ebook reader: books from the private data repo (books/index.json, books/<id>.json, books/<id>.gloss.json,
 // made by tools/import_book.py). Pages of about PAGE_WORDS words, never across a chapter; tap a word for its
-// German translation (book glossary, else your own card, else a DeepL link). Reading progress lives in
+// German translation (book glossary, else your own card); the sentence's translation is prepared ahead
+// (books/<id>.de.json), else machine-translated (MyMemory), else a DeepL link. Reading progress lives in
 // progress.json under "reading"; a page counts toward the daily reading goal when you turn past it (once).
 
 export const PAGE_WORDS = 220;
@@ -294,8 +295,10 @@ function onTap(e) {
   // the sentence's German translation (books/<id>.de.json, made ahead of your position); DeepL only when missing
   const de = trans[p]?.[sentence.i] ?? "";
   $("sheet-de").textContent = de;
-  $("sheet-deepl").hidden = !!de;
+  $("sheet-de").classList.remove("mt");
+  $("sheet-deepl").hidden = true;
   $("sheet-deepl").href = `https://www.deepl.com/translator#fr/de/${encodeURIComponent(sentence.text)}`;
+  if (!de) machineTranslate(sentence.text);
   $("sheet").hidden = false;
 }
 
@@ -317,6 +320,60 @@ function addWord(auto = false) {
   ctx.save();
   renderOwn(null);
   toast(auto ? "Looked up twice: added to your cards" : "Added to your cards");
+}
+
+// ---------- machine translation: only for sentences without a prepared translation ----------
+// 1. Chrome's built-in on-device translator (desktop Chrome), 2. MyMemory (free, works from the browser,
+// about 5,000 characters a day without an account). Results are kept on this device. If both fail: DeepL link.
+
+const MT_KEY = "ft.mt", MT_MAX = 400;
+let mtSeq = 0, translator = null;
+const mtCache = (() => { try { return JSON.parse(localStorage.getItem(MT_KEY) ?? "{}"); } catch { return {}; } })();
+function mtRemember(fr, de) {
+  mtCache[fr] = de;
+  const keys = Object.keys(mtCache);
+  for (const k of keys.slice(0, Math.max(0, keys.length - MT_MAX))) delete mtCache[k];
+  try { localStorage.setItem(MT_KEY, JSON.stringify(mtCache)); } catch { /* full or blocked: session only */ }
+}
+
+async function builtIn(text) {
+  if (!("Translator" in self)) return null;
+  try {
+    if (!translator) {
+      const opts = { sourceLanguage: "fr", targetLanguage: "de" };
+      const a = await self.Translator.availability(opts);
+      if (a === "unavailable") return null;
+      translator = await self.Translator.create(opts);
+    }
+    return (await translator.translate(text)) || null;
+  } catch { return null; }
+}
+
+async function myMemory(text) {
+  const r = await fetch(`https://api.mymemory.translated.net/get?langpair=fr%7Cde&q=${encodeURIComponent(text.slice(0, 500))}`);
+  if (!r.ok) throw new Error(`MyMemory ${r.status}`);
+  const j = await r.json();
+  const de = j?.responseData?.translatedText;
+  if (Number(j?.responseStatus) !== 200 || !de || /MYMEMORY WARNING|QUERY LENGTH LIMIT/i.test(de)) throw new Error(de || "MyMemory: no translation");
+  return de;
+}
+
+async function machineTranslate(fr) {
+  const seq = ++mtSeq, el = $("sheet-de");
+  const done = (de) => {
+    if (seq !== mtSeq) return;   // another word was tapped meanwhile
+    el.textContent = de;
+    el.classList.toggle("mt", !!de);
+    el.title = de ? "Machine translation (no prepared translation for this sentence yet)" : "";
+    $("sheet-deepl").hidden = !!de;
+  };
+  if (mtCache[fr]) { done(mtCache[fr]); return; }
+  el.textContent = "Translating…";
+  el.classList.add("mt");
+  let de = await builtIn(fr);
+  if (!de) { try { de = await myMemory(fr); } catch { de = null; } }
+  if (de) { mtRemember(fr, de); done(de); }
+  else done("");
 }
 
 // Sentence ends: . ! ? … , closing quotes/brackets after them, then a space or the end; M. / Mr. don't end one.
