@@ -4,12 +4,16 @@
     python tools/import_book.py path/to/book.epub --id hobbit  # choose the book id (default: from the title)
     python tools/import_book.py --gloss verne-tour-du-monde --limit 1500   # German glossary, in reading order
     python tools/import_book.py --coverage hobbit              # how much of the book your words cover
+    python tools/import_book.py --ahead 30 --push              # glossary + sentence translations 30 pages past
+                                                               # your position (scheduled task)
 
 Writes (all in the private data repo, never in this public code repo):
   books/<id>.json        title, author, chapters, paragraphs (long ones split at sentence ends)
   books/<id>.gloss.json  word form -> [lemma, pos, German gloss, other meanings]; made with headless
                          Claude Code (`claude -p`), resumable, forms in reading order so the first
                          chapters are covered first
+  books/<id>.de.json     paragraph -> German translation of each sentence (same split as the app), made
+                         ahead of your reading position
   books/index.json       the library list the app shows
 The raw file is copied to imports/books/ (gitignored: bought ebooks stay local).
 
@@ -389,17 +393,41 @@ Forms (form | passage):
 """
 
 
-def ask_claude(prompt):
+MODEL = "sonnet"
+LIMIT_ERR = re.compile(r"limit|usage|quota|rate", re.I)
+
+
+def ask_claude(prompt, model=MODEL):
     exe = shutil.which("claude") or shutil.which("claude.cmd")
-    r = subprocess.run([exe, "-p", "--output-format", "text"], input=prompt,
+    r = subprocess.run([exe, "-p", "--model", model, "--output-format", "text"], input=prompt,
                        capture_output=True, text=True, encoding="utf-8", timeout=900)
     if r.returncode:
-        raise RuntimeError(r.stderr.strip()[:500])
-    m = re.search(r"\{.*\}", r.stdout, re.S)
-    return json.loads(m.group(0))
+        lines = [l for l in (r.stderr + r.stdout).splitlines() if l.strip() and not l.startswith("Warning:")]
+        raise RuntimeError(" ".join(lines)[-300:] or f"exit {r.returncode}")
+    # the first complete JSON object (a reply sometimes adds prose after it)
+    start = r.stdout.find("{")
+    if start < 0:
+        raise ValueError("no JSON in reply")
+    return json.JSONDecoder().raw_decode(r.stdout[start:])[0]
 
 
-def make_gloss(data, book_id, limit):
+def push(data, paths, msg):
+    """Commit the given data files and push (the app writes only progress.json, so a rebase never conflicts)."""
+    git = ["git", "-C", str(data)]
+    subprocess.run(git + ["add", *paths], check=False)
+    if subprocess.run(git + ["diff", "--cached", "--quiet"]).returncode == 0:
+        return
+    subprocess.run(git + ["commit", "-q", "-m", msg], check=False)
+    for _ in range(3):
+        subprocess.run(git + ["pull", "-q", "--rebase", "--autostash"], check=False)
+        if subprocess.run(git + ["push", "-q"]).returncode == 0:
+            return
+    print("  (push failed; the next batch tries again)")
+
+
+def make_gloss(data, book_id, limit, upto=None, do_push=False):
+    """Glossary entries for the forms in reading order (upto: only forms that occur before this paragraph).
+    Returns False when a usage limit stopped it."""
     books = data / "books"
     book = load(books / f"{book_id}.json", None)
     if not book:
@@ -407,17 +435,21 @@ def make_gloss(data, book_id, limit):
     gpath = books / f"{book_id}.gloss.json"
     gloss = load(gpath, {})
     forms = distinct_forms(book)
-    todo = [k for k in forms if k not in gloss]
+    wanted = forms if upto is None else distinct_forms({"paras": book["paras"][:upto]})
+    todo = [k for k in wanted if k not in gloss]
     if limit:
         todo = todo[:limit]
-    print(f"{len(forms)} forms, {len(gloss)} in the glossary, {len(todo)} to do now")
+    print(f"{book_id}: {len(forms)} forms, {len(gloss)} in the glossary, {len(todo)} to do now"
+          + (f" (up to paragraph {upto})" if upto is not None else ""), flush=True)
     for i in range(0, len(todo), GLOSS_BATCH):
         batch = todo[i:i + GLOSS_BATCH]
         lines = "\n".join(f"{k} | {forms[k]}" for k in batch)
         try:
             res = ask_claude(GLOSS_PROMPT.format(forms=lines))
         except Exception as e:   # the next run retries these
-            print(f"batch {i // GLOSS_BATCH + 1}: failed ({e})")
+            print(f"gloss batch {i // GLOSS_BATCH + 1}: failed ({str(e)[:200]})", flush=True)
+            if LIMIT_ERR.search(str(e)):
+                return False
             continue
         got = 0
         for k in batch:
@@ -427,8 +459,129 @@ def make_gloss(data, book_id, limit):
                 got += 1
         save(gpath, gloss)
         update_index(data, book_id)
-        print(f"batch {i // GLOSS_BATCH + 1}: {got}/{len(batch)}, glossary {len(gloss)}/{len(forms)}", flush=True)
-    print(json.dumps(update_index(data, book_id), ensure_ascii=False))
+        print(f"gloss batch {i // GLOSS_BATCH + 1}: {got}/{len(batch)}, glossary {len(gloss)}/{len(forms)}", flush=True)
+        if do_push and got:
+            push(data, [f"books/{book_id}.gloss.json", "books/index.json"], f"Glossary {book_id}: {len(gloss)}/{len(forms)}")
+    if upto is None:
+        print(json.dumps(update_index(data, book_id), ensure_ascii=False))
+    return True
+
+
+# ---------- sentence translations ----------
+
+# Sentence ends: . ! ? … (one or more), closing quotes/brackets after them, then a space or the end.
+# The app splits the same way (sentences() in js/reader.js), so translations line up with the tapped sentence.
+SENT_END = re.compile(r"[.!?…]+(?:[\s\u00a0\u202f]*[»”\")\]])*(?=\s|$)")
+ABBREV = re.compile(r"(?:^|[\s(«])(?:M|Mr|Mrs|Mme|Mlle|Dr|St|[A-Z])$")
+
+
+def sentences(text):
+    """Sentence spans [start, end) of a paragraph; abbreviations like M. or Mr. don't end a sentence."""
+    out, s = [], 0
+    for m in SENT_END.finditer(text):
+        if m.group(0) == "." and ABBREV.search(text[:m.start()]):
+            continue
+        if text[s:m.end()].strip():
+            out.append((s, m.end()))
+        s = m.end()
+    if text[s:].strip():
+        out.append((s, len(text)))
+    return out
+
+
+TRANS_PROMPT = """Translate French sentences from a book into German for a German learner reading the original.
+Translate each numbered sentence on its own (one German sentence per French one, same count, same order), close to
+the French wording and structure while staying correct, natural German; keep names as they are; mirror the tense
+(passé simple -> Präteritum). The paragraph context is given by the order of the sentences.
+
+Reply with JSON only, no prose: {{"<paragraph>": ["<German 1>", "<German 2>", ...], ...}}
+
+Sentences (paragraph.sentence | French):
+{lines}
+"""
+TRANS_WORDS = 1500   # French words per call
+
+
+def make_translations(data, book_id, start, end, do_push=False):
+    """German translations of every sentence in paragraphs [start, end): books/<id>.de.json, {para: [German, ...]}.
+    Returns False when a usage limit stopped it."""
+    books = data / "books"
+    book = load(books / f"{book_id}.json", None)
+    tpath = books / f"{book_id}.de.json"
+    trans = load(tpath, {})
+    todo = [p for p in range(start, min(end, len(book["paras"]))) if str(p) not in trans and sentences(book["paras"][p])]
+    print(f"{book_id}: translations for paragraphs {start}-{end}: {len(todo)} to do", flush=True)
+    batches, cur, w = [], [], 0
+    for p in todo:
+        n = len(words_of(book["paras"][p]))
+        if cur and w + n > TRANS_WORDS:
+            batches.append(cur)
+            cur, w = [], 0
+        cur.append(p)
+        w += n
+    if cur:
+        batches.append(cur)
+    for bi, batch in enumerate(batches, 1):
+        spans = {p: sentences(book["paras"][p]) for p in batch}
+        lines = "\n".join(f"{p}.{i + 1} | {book['paras'][p][a:b].strip()}" for p in batch for i, (a, b) in enumerate(spans[p]))
+        try:
+            res = ask_claude(TRANS_PROMPT.format(lines=lines))
+        except Exception as e:
+            print(f"translation batch {bi}/{len(batches)}: failed ({str(e)[:200]})", flush=True)
+            if LIMIT_ERR.search(str(e)):
+                return False
+            continue
+        got = 0
+        for p in batch:
+            de = res.get(str(p))
+            if isinstance(de, list) and len(de) == len(spans[p]) and all(isinstance(x, str) and x.strip() for x in de):
+                trans[str(p)] = [x.strip() for x in de]
+                got += 1
+        save(tpath, trans)
+        print(f"translation batch {bi}/{len(batches)}: {got}/{len(batch)} paragraphs, {len(trans)} in all", flush=True)
+        if do_push and got:
+            push(data, [f"books/{book_id}.de.json"], f"Translations {book_id}: {len(trans)} paragraphs")
+    return True
+
+
+# ---------- ahead of the reader ----------
+
+def para_after(book, pos, pages):
+    """The paragraph about `pages` pages (of 220 words) after paragraph pos."""
+    w, p = 0, pos
+    while p < len(book["paras"]) and w < pages * 220:
+        w += len(words_of(book["paras"][p]))
+        p += 1
+    return p
+
+
+def ahead(data, pages, do_push):
+    """For the books you are reading (most recent first): glossary and sentence translations up to `pages` pages
+    past your position, so the next pages are always covered. Positions come from progress.json (reading.books)."""
+    prog = load(data / "progress.json", {})
+    reading = sorted(((st.get("at", 0), bid, st.get("pos", 0)) for bid, st in (prog.get("reading", {}).get("books") or {}).items()),
+                     reverse=True)
+    if not reading:
+        print("no book started")
+        return
+    for _, bid, pos in reading[:2]:
+        book = load(data / "books" / f"{bid}.json", None)
+        if not book:
+            continue
+        end = para_after(book, pos, pages)
+        # translations from a page before your position (going back a page is common), then the glossary
+        ok = make_translations(data, bid, para_after_back(book, pos), end, do_push)
+        if not ok or not make_gloss(data, bid, 0, upto=end, do_push=do_push):
+            print("usage limit: stopping", flush=True)
+            return
+
+
+def para_after_back(book, pos, words=220):
+    w, p = 0, pos
+    while p > 0 and w < words:
+        p -= 1
+        w += len(words_of(book["paras"][p]))
+    return p
 
 
 def main():
@@ -440,11 +593,17 @@ def main():
     ap.add_argument("--gloss", metavar="ID", help="make the German glossary for this book")
     ap.add_argument("--limit", type=int, default=0, help="glossary: max word forms this run")
     ap.add_argument("--coverage", metavar="ID", help="recompute the coverage of this book")
+    ap.add_argument("--ahead", type=int, metavar="PAGES", help="glossary + sentence translations this many pages past "
+                    "your reading position (books you are reading; scheduled task)")
+    ap.add_argument("--push", action="store_true", help="commit and push the book files after every batch")
     args = ap.parse_args()
     data = Path(args.data)
     (data / "books").mkdir(exist_ok=True)
+    if args.ahead:
+        ahead(data, args.ahead, args.push)
+        return
     if args.gloss:
-        make_gloss(data, args.gloss, args.limit)
+        make_gloss(data, args.gloss, args.limit, do_push=args.push)
         return
     if args.coverage:
         print(json.dumps(update_index(data, args.coverage), ensure_ascii=False, indent=1))

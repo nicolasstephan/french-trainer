@@ -206,6 +206,8 @@ button:disabled { opacity: .4; cursor: default; }
 .sheet-gloss:empty { display: none; }
 .sheet .small { margin: 4px 0 0; }
 .sheet-sentence { font-family: Georgia, serif; color: var(--text-mid); margin: 10px 0 0; font-size: .95rem; line-height: 1.5; }
+.sheet-de { color: var(--text); margin: 6px 0 0; font-size: .95rem; line-height: 1.5; }
+.sheet-de:empty { display: none; }
 .sheet-sentence mark { background: none; color: var(--text); font-weight: 600; border-bottom: 2px solid var(--text); }
 .sheet-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: .9rem; }
 .sheet-foot .chip { font-size: .85rem; padding: 3px 9px; border: 1px solid var(--sec-border); border-radius: 99px; }

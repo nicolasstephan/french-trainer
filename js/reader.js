@@ -90,7 +90,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 const nowS = () => Math.floor(Date.now() / 1000);
 
 let ctx = null;          // { getReading, save, fetchFile, ownCard, show, toHome, onRead }
-let library = [], book = null, gloss = {}, pages = [], paraWords = [], page = 0, wordsOf = [];
+let library = [], book = null, gloss = {}, trans = {}, pages = [], paraWords = [], page = 0, wordsOf = [];
 
 export function initReader(c) {
   ctx = c;
@@ -154,9 +154,10 @@ function readWords(read, b) {
 async function openBook(id) {
   $("lib-list").innerHTML = `<p class="dim">Opening…</p>`;
   try {
-    const [b, g] = await Promise.all([ctx.fetchFile(`books/${id}.json`), ctx.fetchFile(`books/${id}.gloss.json`).catch(() => null)]);
+    const [b, g, t] = await Promise.all([ctx.fetchFile(`books/${id}.json`), ctx.fetchFile(`books/${id}.gloss.json`).catch(() => null),
+      ctx.fetchFile(`books/${id}.de.json`).catch(() => null)]);
     if (!b) throw new Error(`books/${id}.json not found`);
-    book = b; gloss = g ?? {};
+    book = b; gloss = g ?? {}; trans = t ?? {};
   } catch (e) {
     $("lib-list").innerHTML = `<p class="error">${esc(e.message)}</p>`;
     return;
@@ -272,7 +273,7 @@ function onTap(e) {
   const text = book.paras[p], form = text.slice(a, b), k = key(form);
   const g = gloss[k] ?? gloss[k.replace(/'$/, "e")] ?? null;   // l' -> le
   const own = ctx.ownCard(k, g?.[0]);
-  const sentence = sentenceAt(text, a, b);
+  const sentence = sentenceAt(text, a);
   const reading = ctx.getReading();
   const l = reading.looked[k];
   reading.looked[k] = [(l?.[0] ?? 0) + 1, nowS()];
@@ -290,6 +291,10 @@ function onTap(e) {
   $("sheet-none").hidden = !!(g?.[2] || own?.gloss);
   renderOwn(own);
   $("sheet-sentence").innerHTML = esc(sentence.text.slice(0, sentence.a)) + `<mark>${esc(form)}</mark>` + esc(sentence.text.slice(sentence.a + form.length));
+  // the sentence's German translation (books/<id>.de.json, made ahead of your position); DeepL only when missing
+  const de = trans[p]?.[sentence.i] ?? "";
+  $("sheet-de").textContent = de;
+  $("sheet-deepl").hidden = !!de;
   $("sheet-deepl").href = `https://www.deepl.com/translator#fr/de/${encodeURIComponent(sentence.text)}`;
   $("sheet").hidden = false;
 }
@@ -314,13 +319,33 @@ function addWord(auto = false) {
   toast(auto ? "Looked up twice: added to your cards" : "Added to your cards");
 }
 
-function sentenceAt(text, a, b) {
-  let s = a, e = b;
-  while (s > 0 && !/[.!?…]\s/.test(text.slice(s - 2, s))) s--;
-  while (e < text.length && !/[.!?…]/.test(text[e])) e++;
-  e = Math.min(text.length, e + 1);
+// Sentence ends: . ! ? … , closing quotes/brackets after them, then a space or the end; M. / Mr. don't end one.
+// Same rules as sentences() in tools/import_book.py: translations (books/<id>.de.json) are per sentence in this order.
+const SENT_END = /[.!?…]+(?:[\s\u00a0\u202f]*[»”")\]])*(?=\s|$)/g;
+const ABBREV = /(?:^|[\s(«])(?:M|Mr|Mrs|Mme|Mlle|Dr|St|[A-Z])$/;
+
+/** Sentence spans [start, end) of a paragraph. */
+export function sentences(text) {
+  const out = [];
+  let s = 0;
+  for (const m of text.matchAll(SENT_END)) {
+    if (m[0] === "." && ABBREV.test(text.slice(0, m.index))) continue;
+    const e = m.index + m[0].length;
+    if (text.slice(s, e).trim()) out.push([s, e]);
+    s = e;
+  }
+  if (text.slice(s).trim()) out.push([s, text.length]);
+  return out;
+}
+
+/** The sentence around a word: its text, the word's offset in it, and its index in the paragraph. */
+function sentenceAt(text, a) {
+  const all = sentences(text);
+  let i = all.findIndex(([, e]) => a < e);
+  if (i < 0) i = all.length - 1;
+  const [s, e] = all[i] ?? [0, text.length];
   const raw = text.slice(s, e), lead = raw.length - raw.trimStart().length;
-  return { text: raw.trim(), a: a - s - lead };
+  return { text: raw.trim(), a: a - s - lead, i };
 }
 
 function closeSheet() {
