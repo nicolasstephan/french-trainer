@@ -11,6 +11,10 @@ translation marked [[like this]] in "de", plus other meanings of the word.
     python tools/make_sentences.py --limit 40      # try a small batch first
     python tools/make_sentences.py --redo cou,parmi
     python tools/make_sentences.py --push          # commit + push sentences.json after every batch (scheduled job)
+    python tools/make_sentences.py --alts --limit 400 --push   # alternatives for sentences made before "alt" existed
+
+"alt" per sentence: other words that are also right in the gap. The app then says "also right, but another word is
+wanted" instead of counting a miss. Entries with alt checked carry "alts": 1.
 
 Model: Sonnet by default (--model; same quality for this job at a fraction of Opus's usage). Batches of 60 words,
 one at a time with a pause in between (--batch, --jobs, --pause), so a run doesn't eat the whole usage allowance;
@@ -65,10 +69,12 @@ of the lemma (not repeating the gloss; empty list if none).
 Per sentence: "de" = full German translation in which the German for the target is wrapped in [[ ]]. Usually one
 [[...]]; if the German form is split (werde ... haben, hat ... gesehen, ruft ... an), mark each part:
 "Morgen [[werde]] ich mehr Zeit für dich [[haben]]." "hint" = the German for the target as one phrase ("werde haben").
+"alt" = other French words that would be EQUALLY correct in the gap: same meaning as the hint, the exact form that
+fits the gap (agreement, tense, elision), natural French. Real synonyms only, not the target; usually [].
 
 Reply with JSON only, no prose, shaped:
 {{"<id>": {{"lemma": "...", "pos": "...", "gender": null, "gloss": "...", "meanings": ["..."],
-  "sentences": [{{"fr": "...", "de": "... [[...]] ...", "hint": "..."}}]}}}}
+  "sentences": [{{"fr": "...", "de": "... [[...]] ...", "hint": "...", "alt": []}}]}}}}
 
 Words (id | target | level):
 {words}
@@ -87,8 +93,21 @@ def ask_claude(prompt, model=MODEL):
         # skip claude's sign-in warnings: the real error comes after them
         lines = [l for l in (r.stderr + r.stdout).splitlines() if l.strip() and not l.startswith("Warning:")]
         raise RuntimeError(" ".join(lines)[-300:] or f"exit {r.returncode}")
-    m = re.search(r"\{.*\}", r.stdout, re.S)
-    return json.loads(m.group(0))
+    # the first complete JSON object (replies sometimes add a line of prose or a second block after it)
+    start = r.stdout.find("{")
+    if start < 0:
+        raise ValueError("no JSON in reply")
+    return json.JSONDecoder().raw_decode(r.stdout[start:])[0]
+
+
+def clean_alts(word, alts):
+    """Single words or short phrases, not the target itself."""
+    out = []
+    for a in alts if isinstance(alts, list) else []:
+        a = str(a).strip()
+        if a and a.lower() != word.lower() and len(a.split()) <= 3 and a not in out:
+            out.append(a)
+    return out
 
 
 def check(word, entry):
@@ -96,8 +115,70 @@ def check(word, entry):
     pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?![\w])", re.I)
     entry["sentences"] = [s for s in entry.get("sentences", [])
                           if pat.search(s.get("fr", "")) and 1 <= s.get("de", "").count("[[") <= 3]
+    for s in entry["sentences"]:
+        s["alt"] = clean_alts(word, s.get("alt"))
     entry["v"] = VERSION
+    entry["alts"] = 1
     return entry
+
+
+ALT_PROMPT = """You check French cloze sentences for a vocabulary trainer. The learner is German and types the missing
+word (___). For each sentence, list other French words that would be EQUALLY correct in the gap: same meaning as the
+German hint, the exact form that fits the gap (agreement, tense, mood, elision, e.g. after "l'" or "qu'" only words
+starting with a vowel sound), natural French a teacher would accept. Real synonyms only; not the target itself;
+not a different form of the target; nothing that changes the meaning. Most gaps have none: then [].
+
+Reply with JSON only, no prose: {{"<id>": [[alternatives for sentence 1], [sentence 2], ...]}}
+
+Sentences (id | target | sentence number | German hint | sentence):
+{lines}
+"""
+
+
+def gapped(fr, word):
+    pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?![\w])", re.I)
+    return pat.sub("___", fr, count=1)
+
+
+def backfill_alts(args, data, out, out_path):
+    """Add "alt" to entries made before it existed (one call per batch of words, same pacing as sentences)."""
+    todo = [(i, e) for i, e in out.items() if is_current(e) and not e.get("alts")]
+    if args.limit:
+        todo = todo[:args.limit]
+    print(f"alternatives: {len(todo)} words to check", flush=True)
+    size = args.batch * 2   # the replies are short
+    batches = [todo[i:i + size] for i in range(0, len(todo), size)]
+    t0 = time.time()
+    for n, batch in enumerate(batches, 1):
+        if n > 1 and args.pause:
+            time.sleep(args.pause)
+        lines = "\n".join(f"{i} | {e['word']} | {k + 1} | {s.get('hint') or e.get('gloss', '')} | {gapped(s['fr'], e['word'])}"
+                          for i, e in batch for k, s in enumerate(e["sentences"]))
+        try:
+            res = ask_claude(ALT_PROMPT.format(lines=lines), args.model)
+        except Exception as e:
+            if re.search(r"limit|usage|quota|rate", str(e), re.I):
+                print(f"alt batch {n}/{len(batches)}: usage limit reached, stopping ({str(e)[:200]})", flush=True)
+                break
+            print(f"alt batch {n}/{len(batches)}: failed ({str(e)[:200]})", flush=True)
+            continue
+        got = with_alt = 0
+        for i, e in batch:
+            r = res.get(i)
+            if not isinstance(r, list):
+                continue
+            for k, s in enumerate(e["sentences"]):
+                s["alt"] = clean_alts(e["word"], r[k] if k < len(r) else [])
+                with_alt += bool(s["alt"])
+            e["alts"] = 1
+            got += 1
+        out_path.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"alt batch {n}/{len(batches)}: {got}/{len(batch)} words, {with_alt} sentences with alternatives "
+              f"({(time.time() - t0) / 60:.0f} min)", flush=True)
+        if args.push and got:
+            push(data, f"Sentences: alternatives for {got} words")
+    left = sum(1 for e in out.values() if is_current(e) and not e.get("alts"))
+    print(f"alternatives done: {left} words still without")
 
 
 # format/rules version of an entry; older entries are redone first
@@ -121,6 +202,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=JOBS, help="calls at the same time")
     ap.add_argument("--pause", type=int, default=PAUSE, help="seconds between batches")
     ap.add_argument("--push", action="store_true", help="commit and push sentences.json after every batch")
+    ap.add_argument("--alts", action="store_true", help="only add alternatives (alt) to existing sentences")
     args = ap.parse_args()
     data = Path(args.data)
     words = json.loads((data / "words.json").read_text(encoding="utf-8"))["words"]
@@ -132,6 +214,9 @@ def main():
     for w in words + extra:
         if w["word"] in redo:
             out.pop(w["id"], None)
+    if args.alts:
+        backfill_alts(args, data, out, out_path)
+        return
 
     known = [w["word"] for w in words if w["stage"] == "known" and w["first_try_rate"] >= 0.6]
     todo = [w for w in (extra if args.extra else words + extra) if not is_current(out.get(w["id"]))]

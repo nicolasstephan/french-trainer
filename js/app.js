@@ -361,7 +361,7 @@ function finished() {
 // ---------- card ----------
 
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-let target = "";
+let target = "", curSent = null;
 
 function renderCard() {
   const w = byId.get(current), s = sentences[current], c = cards.get(current);
@@ -370,6 +370,7 @@ function renderCard() {
   const m = re.exec(sent.fr);
   const before = m ? sent.fr.slice(0, m.index) : sent.fr + " ", after = m ? sent.fr.slice(m.index + m[0].length) : "";
   target = m ? m[0] : w.word;
+  curSent = sent;
   $("sentence").innerHTML = `${esc(before)}<span class="solution" id="solution" hidden></span><input class="gap" id="gap" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Missing word">${esc(after)}`;
   fitGap();
   $("gap").addEventListener("input", fitGap);
@@ -383,7 +384,6 @@ function renderCard() {
   feedback("", "");
   $("related").innerHTML = "";
   $("next").textContent = "Check";
-  $("reveal").hidden = false;
   show("trainer");
   $("gap").focus();
 }
@@ -410,27 +410,61 @@ function record(ok) {
   answer(cards.get(current), ok, t, iter++);
   saveSoon();
   renderCounts();
-  if (before < goal() && doneToday() >= goal()) {
-    const { n, goal: rg } = readToday();
-    toast(`Daily vocabulary goal reached: ${goal()} cards!` + (rg && n < rg ? ` Now ${pagesOf(rg - n)} pages of reading.` : rg ? " Reading done too: day complete." : ""));
-  }
+  if (before < goal() && doneToday() >= goal()) goalReached = true;   // the dialog opens once the answer is shown
 }
 
-function toast(msg) {
-  const t = $("toast");
-  t.textContent = msg;
-  t.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { t.hidden = true; }, 4000);
+/** Card goal reached: a dialog to dismiss (Practice more / Read / Menu), not just a toast. */
+let goalReached = false;
+function goalDialog() {
+  goalReached = false;
+  const { n, goal: rg } = readToday(), past = creditDay ? ` for ${dayLabel(creditDay)}` : " for today";
+  $("goal-dlg-text").textContent = `${goal()} cards done${past}.`
+    + (rg && n < rg ? ` ${pagesOf(rg - n)} page${rg - n > PAGE_WORDS ? "s" : ""} of reading to go.` : rg ? " Reading done too: day complete." : "")
+    + " Extra practice still counts.";
+  $("goal-dlg-read").hidden = !rg || n >= rg;
+  $("goal-dlg").showModal();
+  $(rg && n < rg ? "goal-dlg-read" : "goal-dlg-more").focus();
+}
+$("goal-dlg").addEventListener("close", () => {
+  const v = $("goal-dlg").returnValue;
+  $("goal-dlg").returnValue = "";
+  if (v === "read") { if (saveTimer) saveNow(); openLibrary(); }
+  else if (v === "home") toHome();
+  else $("next").focus();   // Practice more (or Esc): stay on the card
+});
+
+/** Another word that is also right in this gap: the sentence's own alternatives (alt, made by make_sentences.py),
+ *  or another card of yours with the same part of speech whose German covers this sentence's hint
+ *  (not a form of the same lemma: that would be the wrong form). */
+function isAlternative(typed) {
+  const n = (x) => x.normalize("NFC").replace(/[’ʼ`]/g, "'").trim().toLowerCase();
+  const t = n(typed);
+  if (t === n(target)) return false;
+  if ((curSent?.alt ?? []).some((a) => n(a) === t)) return true;
+  const id = byForm.get(formKey(typed.trim())), me = sentences[current], other = id && sentences[id];
+  if (!other || id === current || !me || other.pos !== me.pos) return false;
+  if ((other.lemma || "").toLowerCase() === (me.lemma || "").toLowerCase()) return false;
+  const de = (x) => (x || "").toLowerCase().trim();
+  const hint = de(curSent?.hint || me.gloss);
+  return !!hint && [other.gloss, ...(other.meanings ?? [])].some((g) => de(g) === hint);
 }
 
-function check(revealed = false) {
+function check() {
   const gap = $("gap");
   if (phase === "shown") { previous = current; next(); return; }
   const typed = gap.value;
   // retyping after a miss: empty Enter does nothing; this attempt never counts for the ladder
   if (phase === "retype" && !typed.trim()) { gap.focus(); return; }
-  const g = revealed || !typed.trim() ? "wrong" : grade(typed, target);   // empty Enter = a miss
+  let g = !typed.trim() ? "wrong" : grade(typed, target);   // empty Enter = a miss
+  // also correct, but another word is wanted: no miss, no answer counted; try again
+  if (g === "wrong" && isAlternative(typed)) {
+    gap.value = "";
+    fitGap();
+    gap.classList.remove("bad");
+    feedback(`„${typed.trim()}“ is also right, but another word is wanted here. Try again.`, "alt");
+    gap.focus();
+    return;
+  }
 
   if (phase === "ask") record(g === "ok");
 
@@ -441,10 +475,9 @@ function check(revealed = false) {
     gap.readOnly = true;
     $("solution").hidden = true;
     const c = cards.get(current);
-    const goalNow = !missed && doneToday() === goal() ? " · Daily goal reached!" : "";   // + toast in record()
     feedback((missed ? ""
       : c.level < GRADUATE ? `Correct · ${c.level}/${GRADUATE} · again in ${LADDER[c.level]} cards`
-      : `Correct · next in ${until(c.due)}`) + goalNow, "good");
+      : `Correct · next in ${until(c.due)}`), "good");
     afterAnswer();
     return;
   }
@@ -457,7 +490,6 @@ function check(revealed = false) {
   fitGap();
   gap.classList.add("bad");
   feedback(g === "accent" ? "Accents" : "", "bad");
-  $("reveal").hidden = true;
   renderStage();
   gap.focus();
 }
@@ -480,9 +512,9 @@ function afterAnswer() {
   }).join("");
   renderStage();
   $("next").textContent = "Next";
-  $("reveal").hidden = true;
   renderStages();
   $("next").focus();
+  if (goalReached) goalDialog();
 }
 
 function feedback(text, cls) { const f = $("feedback"); f.textContent = text; f.className = `feedback ${cls}`; }
@@ -612,7 +644,6 @@ function error(msg) { $("error").textContent = msg; $("error").hidden = !msg; }
 
 $("answer-form").addEventListener("submit", (e) => { e.preventDefault(); check(); });
 $("next").addEventListener("click", () => check());
-$("reveal").addEventListener("click", () => check(true));
 $("ahead").addEventListener("click", () => next(true));
 $("practice").addEventListener("click", () => next());
 $("read").addEventListener("click", () => openLibrary());
@@ -629,7 +660,7 @@ $("wl-home").addEventListener("click", () => home());
 const toHome = () => { if (words.length) { if (saveTimer) saveNow(); home(); } };
 for (const b of ["to-home", "done-home", "logo-home"]) $(b).addEventListener("click", toHome);
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && phase === "shown" && !$("settings").open && current) { e.preventDefault(); check(); }
+  if (e.key === "Enter" && phase === "shown" && !$("settings").open && !$("goal-dlg").open && current) { e.preventDefault(); check(); }
 });
 document.addEventListener("visibilitychange", () => { if (document.hidden && saveTimer) saveNow(); });
 
@@ -734,7 +765,7 @@ initReader({
   toHome,
 });
 
-if (LOCAL) window.__ft = { get target() { return target; }, get iter() { return iter; }, get card() { return cards.get(current); } };
+if (LOCAL) window.__ft = { get target() { return target; }, get iter() { return iter; }, get card() { return cards.get(current); }, get sent() { return curSent; } };
 
 checkForUpdate();
 loadData();

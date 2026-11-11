@@ -122,7 +122,6 @@
       <div class="actions">
         <button type="button" class="ghost" id="to-home">Menu</button>
         <span class="spacer"></span>
-        <button type="button" class="ghost" id="reveal">Show</button>
         <button type="button" class="primary" id="next">Check</button>
       </div>
     </section>
@@ -142,7 +141,6 @@
     </section>
   </main>
 
-  <p class="rd-toast" id="toast" role="status" hidden></p>
   <aside class="sheet" id="sheet" hidden aria-live="polite">
     <div class="sheet-head">
       <span class="sheet-word" id="sheet-word" lang="fr"></span>
@@ -160,6 +158,19 @@
       <a id="sheet-deepl" target="_blank" rel="noopener">Sentence in DeepL ↗</a>
     </div>
   </aside>
+
+  <dialog id="goal-dlg" class="goal-dlg">
+    <form method="dialog">
+      <h2>Daily goal reached</h2>
+      <p id="goal-dlg-text"></p>
+      <div class="dialog-actions">
+        <button value="home" class="ghost">Menu</button>
+        <span class="spacer"></span>
+        <button value="read" class="ghost" id="goal-dlg-read">Read</button>
+        <button value="more" class="primary" id="goal-dlg-more">Practice more</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="settings">
     <form method="dialog" id="settings-form">

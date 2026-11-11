@@ -44,4 +44,6 @@ if (-not $py) { "$(Get-Date -Format s) python not found" | Out-File $log -Append
 & git -C $Data pull -q --ff-only 2>&1 | Out-File $log -Append -Encoding utf8
 & $py (Join-Path $Tools "add_words.py") --tapped-only --no-sentences --push 2>&1 | Out-File $log -Append -Encoding utf8
 & $py (Join-Path $Tools "make_sentences.py") --limit 120 --push 2>&1 | Out-File $log -Append -Encoding utf8
+# alternatives (other words that are also right in the gap) for sentences made before they existed
+& $py (Join-Path $Tools "make_sentences.py") --alts --limit 400 --push 2>&1 | Out-File $log -Append -Encoding utf8
 "--- $(Get-Date -Format s) end" | Out-File $log -Append -Encoding utf8
