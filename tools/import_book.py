@@ -394,7 +394,12 @@ Forms (form | passage):
 
 
 MODEL = "sonnet"
-LIMIT_ERR = re.compile(r"limit|usage|quota|rate", re.I)
+LIMIT_ERR = re.compile(r"\b(limit|usage|quota|rate)\b", re.I)
+
+
+def is_limit(e):
+    """A usage limit stops the run: only a failed claude call (RuntimeError) counts, not a reply with broken JSON."""
+    return isinstance(e, RuntimeError) and bool(LIMIT_ERR.search(str(e)))
 
 
 def ask_claude(prompt, model=MODEL):
@@ -448,7 +453,7 @@ def make_gloss(data, book_id, limit, upto=None, do_push=False):
             res = ask_claude(GLOSS_PROMPT.format(forms=lines))
         except Exception as e:   # the next run retries these
             print(f"gloss batch {i // GLOSS_BATCH + 1}: failed ({str(e)[:200]})", flush=True)
-            if LIMIT_ERR.search(str(e)):
+            if is_limit(e):
                 return False
             continue
         got = 0
@@ -528,7 +533,7 @@ def make_translations(data, book_id, start, end, do_push=False):
             res = ask_claude(TRANS_PROMPT.format(lines=lines))
         except Exception as e:
             print(f"translation batch {bi}/{len(batches)}: failed ({str(e)[:200]})", flush=True)
-            if LIMIT_ERR.search(str(e)):
+            if is_limit(e):
                 return False
             continue
         got = 0

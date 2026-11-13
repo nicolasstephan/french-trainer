@@ -157,7 +157,7 @@ def backfill_alts(args, data, out, out_path):
         try:
             res = ask_claude(ALT_PROMPT.format(lines=lines), args.model)
         except Exception as e:
-            if re.search(r"limit|usage|quota|rate", str(e), re.I):
+            if (isinstance(e, RuntimeError) and re.search(r"\b(limit|usage|quota|rate)\b", str(e), re.I)):
                 print(f"alt batch {n}/{len(batches)}: usage limit reached, stopping ({str(e)[:200]})", flush=True)
                 break
             print(f"alt batch {n}/{len(batches)}: failed ({str(e)[:200]})", flush=True)
@@ -253,7 +253,7 @@ def main():
                 res = fut.result()
             except Exception as e:  # keep going; the next run retries these
                 failed += 1
-                if re.search(r"limit|usage|quota|rate", str(e), re.I) and not stop.is_set():
+                if (isinstance(e, RuntimeError) and re.search(r"\b(limit|usage|quota|rate)\b", str(e), re.I)) and not stop.is_set():
                     stop.set()
                     print(f"batch {n}/{len(batches)}: usage limit reached, stopping ({str(e)[:200]})", flush=True)
                 elif not stop.is_set():
