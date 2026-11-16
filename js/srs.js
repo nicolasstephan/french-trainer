@@ -8,9 +8,12 @@
 //   Below 5 the card comes back after LADDER[level] other cards (2, 4, 8, 16, 32: iterations, not minutes,
 //   like Memrise / Quizlet; Lingvist uses time, ×5 per step). Retyping after a miss never counts.
 //   The iteration counter is the number of answers given so far (all cards, in time order).
-// Long term (level 5): FSRS-5 (open-spaced-repetition, default parameters) tracks stability S (days until
-//   recall drops to 90 %) and difficulty D on every answer; the next review is when predicted recall falls
-//   to RETENTION. Lingvist targets 80 %; FSRS's recommended default is 90 %.
+// Long term (level 5): FSRS-6 (open-spaced-repetition) tracks stability S (days until recall drops to 90 %)
+//   and difficulty D on every answer; the next review is when predicted recall falls to RETENTION.
+//   The weights W are fitted to your own answers (tools/fit_fsrs.py, Lingvist + this app); the FSRS defaults
+//   (averages of Anki users) overestimated your recall by 5-15 points, so intervals were ~1.5x too long.
+//   With the fitted weights the prediction matches your real results, so 90 % means 90 %.
+//   Days count from 4:00 local time (as in the fit and in Anki); answers on the same day are short-term reviews.
 //
 // State is never stored: it is rebuilt by replaying a card's answer log [[unix s, ok], ...]
 // (Lingvist history from words.json + answers in this app). Changing the rules here re-schedules everything.
@@ -21,28 +24,32 @@ export const GRADUATE = 5;
 export const RETENTION = 0.9;
 const MAX_DAYS = 365;
 
-// FSRS-5 default weights
-const W = [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925,
-  1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621];
-const DECAY = -0.5, FACTOR = 19 / 81;
+// FSRS-6 weights (21); refit with: python tools/fit_fsrs.py --write
+export const W = [0.0426, 0.3074, 1.2133, 3.9077, 6.4649, 0.7944, 3.1785, 0.001, 1.7239, 0.1008, 0.659, 1.4512, 0.072, 0.2422, 1.569, 0.6014, 1.8729, 0.8053, 0.2109, 0.1835, 0.2359];   // fitted 2026-11-16 (tools/fit_fsrs.py), 8683 reviews
+const DECAY = -W[20], FACTOR = Math.pow(0.9, 1 / DECAY) - 1;
 const clampD = (d) => Math.min(10, Math.max(1, d));
 const d0 = (g) => clampD(W[4] - Math.exp(W[5] * (g - 1)) + 1);
 /** Predicted recall after t days at stability s. */
 export const recall = (t, s) => Math.pow(1 + (FACTOR * t) / s, DECAY);
 const interval = (s, r = RETENTION) => (s / FACTOR) * (Math.pow(r, 1 / DECAY) - 1);
+/** Day number, days starting at 4:00 local time. */
+const dayNo = (t) => Math.floor((t - new Date(t * 1000).getTimezoneOffset() * 60 - 4 * 3600) / DAY);
 
 function fsrs(c, g, now) {
   if (!c.s) { c.s = W[g - 1]; c.d = d0(g); return; }
-  const t = (now - c.last) / DAY;
+  const t = dayNo(now) - dayNo(c.last);
   if (t < 1) {
-    c.s *= Math.exp(W[17] * (g - 3 + W[18]));          // same-day review
+    // same-day review: small change, never down after a right answer
+    const inc = Math.exp(W[17] * (g - 3 + W[18])) * Math.pow(c.s, -W[19]);
+    c.s *= g >= 3 ? Math.max(inc, 1) : inc;
   } else {
     const r = recall(t, c.s);
     c.s = g === 1
-      ? Math.min(W[11] * Math.pow(c.d, -W[12]) * (Math.pow(c.s + 1, W[13]) - 1) * Math.exp(W[14] * (1 - r)), c.s)
+      ? Math.min(W[11] * Math.pow(c.d, -W[12]) * (Math.pow(c.s + 1, W[13]) - 1) * Math.exp(W[14] * (1 - r)),
+        c.s / Math.exp(W[17] * W[18]))
       : c.s * (Math.exp(W[8]) * (11 - c.d) * Math.pow(c.s, -W[9]) * (Math.exp(W[10] * (1 - r)) - 1) + 1);
   }
-  c.s = Math.max(c.s, 0.01);
+  c.s = Math.max(c.s, 0.001);
   const dp = c.d - W[6] * (g - 3) * (10 - c.d) / 9;
   c.d = clampD(W[7] * d0(4) + (1 - W[7]) * dp);
 }
