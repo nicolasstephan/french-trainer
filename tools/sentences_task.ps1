@@ -1,4 +1,4 @@
-# Turns words you added in the reader into cards, generates missing cloze sentences (at most 120 words a run,
+# Turns words you added in the reader into cards, has Opus check sentences you flagged (flag button), generates missing cloze sentences (at most 120 words a run,
 # one batch at a time), keeps the reader's glossary and sentence translations 30 pages ahead, adds alternatives,
 # and pushes it all to french-data (the phone gets them on its next load or sync).
 #
@@ -61,6 +61,8 @@ if (-not $py) { "$(Get-Date -Format s) python not found" | Out-File $log -Append
 "--- $(Get-Date -Format s) start" | Out-File $log -Append -Encoding utf8
 & git -C $Data pull -q --ff-only 2>&1 | Out-File $log -Append -Encoding utf8
 & $py (Join-Path $Tools "add_words.py") --tapped-only --no-sentences --push 2>&1 | Out-File $log -Append -Encoding utf8
+# sentences you flagged in the app: checked and fixed by Opus
+& $py (Join-Path $Tools "make_sentences.py") --flagged --push 2>&1 | Out-File $log -Append -Encoding utf8
 & $py (Join-Path $Tools "make_sentences.py") --limit 120 --push 2>&1 | Out-File $log -Append -Encoding utf8
 # reader: glossary + sentence translations 30 pages past your position in the books you are reading
 & $py (Join-Path $Tools "import_book.py") --ahead 30 --push 2>&1 | Out-File $log -Append -Encoding utf8

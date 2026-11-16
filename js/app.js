@@ -86,6 +86,11 @@ function mergeProgress(...srcs) {
       out.log[id] = [...seen.values()].sort((a, b) => a[0] - b[0]);
     }
     for (const [d, n] of Object.entries(src.days ?? {})) out.days[d] = Math.max(out.days[d] ?? 0, n);
+    // flagged sentences: the latest change per card wins (unflagging is kept as on: 0)
+    for (const [id, f] of Object.entries(src.flags ?? {})) {
+      if (!out.flags) out.flags = {};
+      if ((f.t ?? 0) >= (out.flags[id]?.t ?? -1)) out.flags[id] = f;
+    }
   }
   return out;
 }
@@ -380,6 +385,7 @@ function renderCard() {
   const more = (s.meanings ?? []).filter(Boolean);
   $("meanings").textContent = more.length ? `auch: ${more.join(", ")}` : "";
   renderStage();
+  renderFlag();
   $("pos").textContent = "";
   feedback("", "");
   $("related").innerHTML = "";
@@ -516,6 +522,29 @@ function afterAnswer() {
   $("next").focus();
   if (goalReached) goalDialog();
 }
+
+// ---------- flag: "something is wrong with this sentence" ----------
+// Stored in progress.json (flags: id -> {t, on, fr}); tools/make_sentences.py --flagged has Opus check the word's
+// sentences and sets "reviewed" on the entry. A flag older than that review counts as done.
+
+const flagOpen = (id) => { const f = progress.flags?.[id]; return !!f?.on && f.t > (sentences[id]?.reviewed ?? 0); };
+
+function renderFlag() {
+  const on = flagOpen(current), b = $("flag");
+  b.setAttribute("aria-pressed", String(on));
+  b.title = on ? "Flagged: the next run checks this word's sentences with Opus. Tap to unflag."
+    : "Something wrong with this sentence? Flag it: the next run checks it with Opus";
+}
+
+$("flag").addEventListener("click", () => {
+  if (!current) return;
+  const on = !flagOpen(current);
+  (progress.flags ??= {})[current] = { t: nowS(), on: on ? 1 : 0, fr: curSent?.fr ?? "" };
+  saveSoon(1000);
+  renderFlag();
+  feedback(on ? "Flagged · checked with Opus in the next run" : "Flag removed", "alt");
+  (phase === "shown" ? $("next") : $("gap"))?.focus();
+});
 
 function feedback(text, cls) { const f = $("feedback"); f.textContent = text; f.className = `feedback ${cls}`; }
 

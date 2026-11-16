@@ -49,6 +49,10 @@ button.danger { color: var(--bad); }
 
 .cloze-card { padding: 22px 18px; }
 .meta { display: flex; gap: 10px; align-items: center; font-size: .8rem; min-height: 20px; }
+.flag-btn { margin-left: auto; min-height: 28px; width: 32px; padding: 0; border: 0; background: transparent;
+  color: var(--text-dim); font-size: 1rem; line-height: 1; opacity: .55; }
+.flag-btn:hover { opacity: 1; background: var(--btn-hover); }
+.flag-btn[aria-pressed="true"] { opacity: 1; color: var(--text); }
 .stage-tag { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; padding: 2px 8px; border-radius: 99px;
   border: 1px solid currentColor; }
 .hint { font-size: 1.15rem; color: var(--text-mid); margin: 14px 0 6px; }

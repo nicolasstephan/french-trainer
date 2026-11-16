@@ -12,6 +12,11 @@ translation marked [[like this]] in "de", plus other meanings of the word.
     python tools/make_sentences.py --redo cou,parmi
     python tools/make_sentences.py --push          # commit + push sentences.json after every batch (scheduled job)
     python tools/make_sentences.py --alts --limit 400 --push   # alternatives for sentences made before "alt" existed
+    python tools/make_sentences.py --flagged --push            # words flagged in the app (⚑): checked and fixed by Opus
+
+Flagged words: the app's ⚑ button writes progress.json "flags" (id -> {t, on, fr}). --flagged sends those words'
+sentences to a stronger model (--review-model, default Opus), which fixes or replaces wrong ones; the entry gets
+"reviewed" (unix s) and "review" (what was changed), so the flag counts as done in the app.
 
 "alt" per sentence: other words that are also right in the gap. The app then says "also right, but another word is
 wanted" instead of counting a miss. Entries with alt checked carry "alts": 1.
@@ -135,6 +140,87 @@ Sentences (id | target | sentence number | German hint | sentence):
 """
 
 
+REVIEW_MODEL = "opus"
+REVIEW_BATCH = 15
+
+REVIEW_PROMPT = """You review French cloze sentences of a vocabulary trainer (like Lingvist). The learner is German, sees the
+sentence with the target word as a gap (___) plus the German translation, and types the missing French word.
+The learner flagged the sentence marked FLAGGED as wrong in some way. Check every sentence of each word, the flagged
+one most carefully:
+- French: grammatical, natural, modern; the target appears EXACTLY as given (spelling, accents, inflection), once.
+- The context makes the target the clearly best answer given the German hint; no other common word fits equally
+  well unless it is listed in "alt".
+- "de": correct, as direct as possible (cognates first), mirroring the French tense, mood, person and number
+  (futur simple -> werden + Infinitiv, conditionnel -> würde / Konjunktiv II, passé composé -> Perfekt, imparfait ->
+  Präteritum). The German for the target wrapped in [[ ]] (each part of a split form: [[werde]] ... [[haben]]).
+- "hint": the German for the target as one phrase. "alt": other French words EQUALLY correct in the gap, exact form
+  that fits; usually [].
+- Entry level: lemma, pos (noun/verb/adj/adv/pron/prep/conj/det/other), gender for nouns (m/f), gloss (direct German
+  for the target as used), meanings (2-5 other common German meanings of the lemma).
+Fix what is wrong; replace a sentence that cannot be fixed with a new one at the same level. Keep correct sentences
+unchanged. Keep the number of sentences.
+"review": one short German sentence saying what was wrong and what you changed ("nichts falsch" if nothing).
+
+Reply with JSON only, no prose, shaped:
+{{"<id>": {{"lemma": "...", "pos": "...", "gender": null, "gloss": "...", "meanings": ["..."],
+  "sentences": [{{"fr": "...", "de": "... [[...]] ...", "hint": "...", "alt": []}}], "review": "..."}}}}
+
+Words:
+{words}
+"""
+
+
+def review_flagged(args, data, out, out_path):
+    """Words flagged in the app since their last review: a stronger model checks and fixes their sentences."""
+    pp = data / "progress.json"
+    flags = (json.loads(pp.read_text(encoding="utf-8")).get("flags") or {}) if pp.exists() else {}
+    todo = [(i, f) for i, f in flags.items()
+            if f.get("on") and i in out and f.get("t", 0) > out[i].get("reviewed", 0)]
+    print(f"flagged: {len(todo)} words to review with {args.review_model}", flush=True)
+    batches = [todo[i:i + REVIEW_BATCH] for i in range(0, len(todo), REVIEW_BATCH)]
+    for n, batch in enumerate(batches, 1):
+        if n > 1 and args.pause:
+            time.sleep(args.pause)
+        blocks = []
+        for i, f in batch:
+            e = out[i]
+            sents = "\n".join(f"  {'FLAGGED ' if s['fr'] == f.get('fr') else ''}{k + 1}. "
+                              + json.dumps({x: s.get(x) for x in ("fr", "de", "hint", "alt")}, ensure_ascii=False)
+                              for k, s in enumerate(e["sentences"]))
+            head = {x: e.get(x) for x in ("lemma", "pos", "gender", "gloss", "meanings")}
+            blocks.append(f"{i} | target: {e['word']} | {json.dumps(head, ensure_ascii=False)}\n{sents}")
+        try:
+            res = ask_claude(REVIEW_PROMPT.format(words="\n\n".join(blocks)), args.review_model)
+        except Exception as e:
+            if isinstance(e, RuntimeError) and re.search(r"\b(limit|usage|quota|rate)\b", str(e), re.I):
+                print(f"review batch {n}/{len(batches)}: usage limit reached, stopping ({str(e)[:200]})", flush=True)
+                break
+            print(f"review batch {n}/{len(batches)}: failed ({str(e)[:200]})", flush=True)
+            continue
+        got = 0
+        for i, f in batch:
+            r = res.get(i)
+            if not isinstance(r, dict):
+                continue
+            word, old = out[i]["word"], out[i]
+            note = str(r.pop("review", "") or "").strip()
+            entry = check(word, r)
+            if not entry["sentences"]:   # nothing usable came back: keep the old sentences, try again next run
+                print(f"  {word}: review gave no usable sentences, kept", flush=True)
+                continue
+            entry["word"] = word
+            entry["reviewed"] = int(time.time())
+            entry["review"] = note
+            changed = [s["fr"] for s in entry["sentences"]] != [s["fr"] for s in old["sentences"]]
+            out[i] = entry
+            got += 1
+            print(f"  {word}: {note}" + (" (sentences changed)" if changed else ""), flush=True)
+        out_path.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"review batch {n}/{len(batches)}: {got}/{len(batch)} words reviewed", flush=True)
+        if args.push and got:
+            push(data, f"Sentences: {got} flagged words reviewed")
+
+
 def gapped(fr, word):
     pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?![\w])", re.I)
     return pat.sub("___", fr, count=1)
@@ -203,6 +289,8 @@ def main():
     ap.add_argument("--pause", type=int, default=PAUSE, help="seconds between batches")
     ap.add_argument("--push", action="store_true", help="commit and push sentences.json after every batch")
     ap.add_argument("--alts", action="store_true", help="only add alternatives (alt) to existing sentences")
+    ap.add_argument("--flagged", action="store_true", help="only review the words flagged in the app (progress.json)")
+    ap.add_argument("--review-model", default=REVIEW_MODEL)
     args = ap.parse_args()
     data = Path(args.data)
     words = json.loads((data / "words.json").read_text(encoding="utf-8"))["words"]
@@ -216,6 +304,9 @@ def main():
             out.pop(w["id"], None)
     if args.alts:
         backfill_alts(args, data, out, out_path)
+        return
+    if args.flagged:
+        review_flagged(args, data, out, out_path)
         return
 
     known = [w["word"] for w in words if w["stage"] == "known" and w["first_try_rate"] >= 0.6]
