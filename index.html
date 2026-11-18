@@ -56,7 +56,45 @@
         <button class="primary practice-btn" id="practice">Practice</button>
         <button class="practice-btn" id="read">Read</button>
         <button class="practice-btn" id="words-btn">Words</button>
+        <button class="practice-btn" id="stats-btn">Stats</button>
       </div>
+    </section>
+
+    <section id="stats" hidden>
+      <div class="st-filter" id="st-filter" role="group" aria-label="Time range"></div>
+      <div class="st-tiles" id="st-tiles"></div>
+      <div class="card">
+        <h2 class="hud-label">Words by stage</h2>
+        <div class="st-legend" id="lg-stage"></div>
+        <div class="chart" id="ch-stage"></div>
+        <p class="dim small">Words you have answered right at least once; queued and never-right words are left out.</p>
+        <details class="st-table"><summary>Table</summary><div id="tb-stage"></div></details>
+      </div>
+      <div class="card">
+        <h2 class="hud-label" id="h-answers">Answers</h2>
+        <div class="chart" id="ch-answers"></div>
+        <details class="st-table"><summary>Table</summary><div id="tb-answers"></div></details>
+      </div>
+      <div class="card">
+        <h2 class="hud-label" id="h-rate">Right first try</h2>
+        <div class="st-legend" id="lg-rate"></div>
+        <div class="chart" id="ch-rate"></div>
+        <p class="dim small">The scheduler aims for 90 % on long-term reviews done on time. Overdue reviews (the backlog) and reviews on Lingvist's schedule (before Nov 2026) run lower. All answers include new words and the learning ladder.</p>
+        <details class="st-table"><summary>Table</summary><div id="tb-rate"></div></details>
+      </div>
+      <div class="card">
+        <h2 class="hud-label">Reviews due, next 30 days</h2>
+        <div class="st-tiles st-tiles-2" id="st-due"></div>
+        <div class="chart" id="ch-due"></div>
+        <p class="dim small">Long-term cards only, not filtered by the range above. The estimate assumes every card of the daily goal is a review.</p>
+        <details class="st-table"><summary>Table</summary><div id="tb-due"></div></details>
+      </div>
+      <div class="card" id="card-read">
+        <h2 class="hud-label" id="h-read">Pages read</h2>
+        <div class="chart" id="ch-read"></div>
+        <details class="st-table"><summary>Table</summary><div id="tb-read"></div></details>
+      </div>
+      <div class="actions"><button type="button" class="ghost" id="st-home">Menu</button><span class="spacer"></span></div>
     </section>
 
     <section id="words" hidden>

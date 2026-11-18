@@ -21,4 +21,7 @@
 [data-style="hud"] .wl-st, [data-style="hud"] .wl-when, [data-style="hud"] .wl-filter .chip { font-family: var(--mono); }
 [data-style="hud"] .book-title { font-family: var(--display); letter-spacing: .06em; }
 [data-style="hud"] .rd-top .icon-btn { font-family: var(--mono); font-size: .85rem; }
-[data-style="hud"] #read, [data-style="hud"] #words-btn { font-family: var(--display); text-transform: uppercase; }
+[data-style="hud"] #read, [data-style="hud"] #words-btn, [data-style="hud"] #stats-btn { font-family: var(--display); text-transform: uppercase; }
+[data-style="hud"] .st-val, [data-style="hud"] .st-filter .chip, [data-style="hud"] .st-table { font-family: var(--mono); }
+[data-style="hud"] .st-lbl { font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; font-size: .68rem; }
+[data-style="hud"] .st-tile { border-radius: 0; }

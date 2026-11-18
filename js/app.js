@@ -6,6 +6,7 @@ import { STYLES, getStyle, setStyle, getThemeMode, setThemeMode } from "./theme.
 import { checkForUpdate } from "./update-check.js";
 import { STAGES, GRADUATE, LADDER, stageOf, replayAll, answer, grade } from "./srs.js";
 import { initReader, openLibrary, emptyReading, mergeReading, readingDays, key as formKey, DEFAULT_READ_PAGES, PAGE_WORDS } from "./reader.js";
+import { initStats, renderStats } from "./stats.js";
 
 const $ = (id) => document.getElementById(id);
 const LS = {
@@ -267,7 +268,7 @@ async function syncNow() {
   }
   index();
   if (!$("home").hidden) home();
-  else { renderCounts(); renderStages(); if (!$("words").hidden) renderWords(); }
+  else { renderCounts(); renderStages(); if (!$("words").hidden) renderWords(); if (!$("stats").hidden) renderStats(); }
 }
 
 // ---------- picking the next card ----------
@@ -687,9 +688,9 @@ $("wl-search").addEventListener("input", (e) => { wl.q = e.target.value; renderW
 // ---------- ui ----------
 
 function show(id) {
-  for (const s of ["setup", "loading", "home", "trainer", "done", "library", "reader", "words"]) $(s).hidden = s !== id;
+  for (const s of ["setup", "loading", "home", "trainer", "done", "library", "reader", "words", "stats"]) $(s).hidden = s !== id;
   if (id !== "reader") $("sheet").hidden = true;
-  document.querySelector(".stages").hidden = id === "reader" || id === "library" || id === "words";
+  document.querySelector(".stages").hidden = id === "reader" || id === "library" || id === "words" || id === "stats";
 }
 function error(msg) { $("error").textContent = msg; $("error").hidden = !msg; }
 
@@ -699,6 +700,9 @@ $("ahead").addEventListener("click", () => next(true));
 $("practice").addEventListener("click", () => next());
 $("read").addEventListener("click", () => openLibrary());
 $("words-btn").addEventListener("click", () => openWords());
+// stats: shown first so the charts can measure their width
+$("stats-btn").addEventListener("click", () => { show("stats"); renderStats(); scrollTo(0, 0); });
+$("st-home").addEventListener("click", () => home());
 $("sync").addEventListener("click", () => syncNow());
 $("days").addEventListener("click", (e) => {
   const b = e.target.closest("[data-day]");
@@ -814,6 +818,17 @@ initReader({
   ownCard,
   show,
   toHome,
+});
+
+initStats({
+  words: () => words,
+  progress: () => progress,
+  cards: () => cards,
+  goal,
+  dayKey,
+  readingDays: () => readingDays(progress.reading, dayKey),
+  readPages,
+  pageWords: PAGE_WORDS,
 });
 
 if (LOCAL) window.__ft = { get target() { return target; }, get iter() { return iter; }, get card() { return cards.get(current); }, get sent() { return curSent; } };
