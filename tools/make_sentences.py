@@ -16,7 +16,8 @@ translation marked [[like this]] in "de", plus other meanings of the word.
 
 Flagged words: the app's ⚑ button writes progress.json "flags" (id -> {t, on, fr}). --flagged sends those words'
 sentences to a stronger model (--review-model, default Opus), which fixes or replaces wrong ones; the entry gets
-"reviewed" (unix s) and "review" (what was changed), so the flag counts as done in the app.
+"reviewed" (unix s), "review" (what was changed, German) and "review_idx" (the flagged sentence), so the flag counts as
+done in the app, which shows the word first in the next session with the note.
 
 "alt" per sentence: other words that are also right in the gap. The app then says "also right, but another word is
 wanted" instead of counting a miss. Entries with alt checked carry "alts": 1.
@@ -115,9 +116,17 @@ def clean_alts(word, alts):
     return out
 
 
+def word_re(word):
+    """The target as a whole word. Either apostrophe matches; an elided form (c', qu', jusqu') runs straight into
+    the next word (c'est), so only a target ending in a letter needs a word boundary after it."""
+    body = "['’]".join(re.escape(p) for p in re.split("['’]", word))
+    tail = "" if word[-1:] in "'’" else r"(?!\w)"
+    return re.compile(r"(?<!\w)" + body + tail, re.I)
+
+
 def check(word, entry):
     """Keep sentences that contain the target as a whole word."""
-    pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?![\w])", re.I)
+    pat = word_re(word)
     entry["sentences"] = [s for s in entry.get("sentences", [])
                           if pat.search(s.get("fr", "")) and 1 <= s.get("de", "").count("[[") <= 3]
     for s in entry["sentences"]:
@@ -211,6 +220,8 @@ def review_flagged(args, data, out, out_path):
             entry["word"] = word
             entry["reviewed"] = int(time.time())
             entry["review"] = note
+            # which sentence was flagged: the app shows that one (in its new version) with the note
+            entry["review_idx"] = next((k for k, s in enumerate(old["sentences"]) if s["fr"] == f.get("fr")), 0)
             changed = [s["fr"] for s in entry["sentences"]] != [s["fr"] for s in old["sentences"]]
             out[i] = entry
             got += 1
@@ -222,8 +233,7 @@ def review_flagged(args, data, out, out_path):
 
 
 def gapped(fr, word):
-    pat = re.compile(r"(?<!\w)" + re.escape(word) + r"(?![\w])", re.I)
-    return pat.sub("___", fr, count=1)
+    return word_re(word).sub("___", fr, count=1)
 
 
 def backfill_alts(args, data, out, out_path):

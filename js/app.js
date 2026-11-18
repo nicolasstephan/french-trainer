@@ -91,6 +91,11 @@ function mergeProgress(...srcs) {
       if (!out.flags) out.flags = {};
       if ((f.t ?? 0) >= (out.flags[id]?.t ?? -1)) out.flags[id] = f;
     }
+    // Opus reviews already shown (id -> the "reviewed" time seen)
+    for (const [id, r] of Object.entries(src.reviewSeen ?? {})) {
+      out.reviewSeen ??= {};
+      out.reviewSeen[id] = Math.max(out.reviewSeen[id] ?? 0, r);
+    }
   }
   return out;
 }
@@ -337,7 +342,8 @@ function pick(ahead = false) {
   const fresh = cap.okAnyPace ? ids.filter(unseen).sort(byRank) : [];
   const fill = flying >= FLIGHT ? [...reviews, ...waiting] : [...reviews, ...waiting].sort(byDue);
   const soonest = ids.filter(inFlight).sort(byIter);
-  return turn[0] ?? (cap.ok ? fresh[0] : null) ?? fill[0] ?? soonest[0] ?? fresh[0]
+  const reviewed = ids.filter(reviewPending);
+  return reviewed[0] ?? turn[0] ?? (cap.ok ? fresh[0] : null) ?? fill[0] ?? soonest[0] ?? fresh[0]
     ?? (ahead ? ids.filter((id) => !unseen(id)).sort(byDue)[0] : null)
     ?? (all.includes(previous) && (learning(previous) || c(previous).due <= now) ? previous : null);
 }
@@ -365,14 +371,22 @@ function finished() {
 
 // ---------- card ----------
 
+/** The card's word as a whole word in a sentence. Either apostrophe matches; an elided form (c', qu', jusqu')
+ *  runs straight into the next word (c'est), so only a word ending in a letter needs a boundary after it. */
+function wordRe(word) {
+  const body = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/['’]/g, "['’]");
+  return new RegExp(`(?<![\\p{L}])${body}${/['’]$/.test(word) ? "" : "(?![\\p{L}])"}`, "iu");
+}
+
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 let target = "", curSent = null;
 
 function renderCard() {
   const w = byId.get(current), s = sentences[current], c = cards.get(current);
-  const sent = s.sentences[c.reps % s.sentences.length];
-  const re = new RegExp(`(?<![\\p{L}])${w.word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`, "iu");
-  const m = re.exec(sent.fr);
+  // just checked by Opus after a flag: the flagged sentence (in its new version) with the note
+  const rv = reviewPending(current);
+  const sent = s.sentences[rv && s.review_idx < s.sentences.length ? s.review_idx : c.reps % s.sentences.length];
+  const m = wordRe(w.word).exec(sent.fr);
   const before = m ? sent.fr.slice(0, m.index) : sent.fr + " ", after = m ? sent.fr.slice(m.index + m[0].length) : "";
   target = m ? m[0] : w.word;
   curSent = sent;
@@ -384,6 +398,8 @@ function renderCard() {
   $("translation").innerHTML = sent.de ? esc(sent.de).replace(/\[\[(.+?)\]\]/g, "<mark>$1</mark>") : esc(sent.en || "");
   const more = (s.meanings ?? []).filter(Boolean);
   $("meanings").textContent = more.length ? `auch: ${more.join(", ")}` : "";
+  $("review-note").hidden = !rv;
+  $("review-note-text").textContent = rv ? s.review || "Geprüft." : "";
   renderStage();
   renderFlag();
   $("pos").textContent = "";
@@ -412,6 +428,7 @@ function fitGap() {
 
 function record(ok) {
   const t = nowS(), before = doneToday();
+  if (reviewPending(current)) (progress.reviewSeen ??= {})[current] = sentences[current].reviewed;
   (progress.log[current] ??= []).push(creditDay ? [t, ok ? 1 : 0, creditDay] : [t, ok ? 1 : 0]);
   answer(cards.get(current), ok, t, iter++);
   saveSoon();
@@ -528,6 +545,11 @@ function afterAnswer() {
 // sentences and sets "reviewed" on the entry. A flag older than that review counts as done.
 
 const flagOpen = (id) => { const f = progress.flags?.[id]; return !!f?.on && f.t > (sentences[id]?.reviewed ?? 0); };
+// reviewed after a flag and not yet answered since: comes first in the next session, with Opus's note
+const reviewPending = (id) => {
+  const r = sentences[id]?.reviewed, f = progress.flags?.[id];
+  return !!r && !!f?.on && f.t <= r && (progress.reviewSeen?.[id] ?? 0) < r;
+};
 
 function renderFlag() {
   const on = flagOpen(current), b = $("flag");

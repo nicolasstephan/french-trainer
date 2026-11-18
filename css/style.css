@@ -72,6 +72,10 @@ button.danger { color: var(--bad); }
 .feedback.good { color: var(--good); }
 .feedback.bad { color: var(--bad); }
 .feedback.alt { color: var(--text-mid); }
+.review-note { margin: 12px 0 0; padding: 8px 12px; border: 1px solid var(--sec-border); border-radius: 8px;
+  font-size: .9rem; line-height: 1.45; color: var(--text-mid); }
+.review-note b { display: block; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.review-note[hidden] { display: none; }
 .goal-dlg { max-width: 380px; }
 .goal-dlg button { white-space: nowrap; }
 .goal-dlg p { margin: 0; line-height: 1.45; }
