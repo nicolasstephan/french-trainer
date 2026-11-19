@@ -7,6 +7,7 @@ import { checkForUpdate } from "./update-check.js";
 import { STAGES, GRADUATE, LADDER, stageOf, replayAll, answer, grade } from "./srs.js";
 import { initReader, openLibrary, emptyReading, mergeReading, readingDays, key as formKey, DEFAULT_READ_PAGES, PAGE_WORDS } from "./reader.js";
 import { initStats, renderStats } from "./stats.js";
+import { initSystem, renderSystem } from "./system.js";
 
 const $ = (id) => document.getElementById(id);
 const LS = {
@@ -278,6 +279,9 @@ async function syncNow() {
 const DEFAULT_MAX_NEW = 15;   // new words a day at full capacity
 const maxNew = () => progress.maxNew ?? DEFAULT_MAX_NEW;
 const RECENT = 50;            // answers that decide today's capacity
+// new-word gate (also shown on the How it works page): first-try rate ACC_NONE → no new words, ACC_FULL → full allowance;
+// paused while STRUGGLE+ training words were just missed or more than REVIEWS_FIRST reviews are due
+const ACC_NONE = 0.75, ACC_FULL = 0.9, STRUGGLE = 3, REVIEWS_FIRST = 15;
 const unseen = (id) => cards.get(id).reps === 0;
 
 /** New words introduced today (first answer today, no Lingvist history). */
@@ -297,7 +301,7 @@ function newWordCapacity() {
   const now = nowS();
   const recent = Object.values(progress.log).flat().sort((a, b) => b[0] - a[0]).slice(0, RECENT);
   const acc = recent.length >= 15 ? recent.filter((e) => e[1]).length / recent.length : null;
-  const f = acc == null ? 2 / 3 : Math.min(1, Math.max(0, (acc - 0.75) / 0.15));
+  const f = acc == null ? 2 / 3 : Math.min(1, Math.max(0, (acc - ACC_NONE) / (ACC_FULL - ACC_NONE)));
   const budget = Math.round(maxNew() * f), used = newToday();
   const ids = playable();
   const c = (id) => cards.get(id);
@@ -308,9 +312,9 @@ function newWordCapacity() {
   let reason = "";
   if (!queued) reason = "queue empty (run tools/add_words.py)";
   else if (used >= budget) reason = budget ? "today's new words done" : `first-try rate ${Math.round(100 * acc)} %: consolidate first`;
-  else if (struggling >= 3) reason = `${struggling} words need work first`;
+  else if (struggling >= STRUGGLE) reason = `${struggling} words need work first`;
   else if (training.length >= FLIGHT - 2) reason = "enough words in training";
-  else if (due > 15) reason = `${due} reviews first`;
+  else if (due > REVIEWS_FIRST) reason = `${due} reviews first`;
   const pace = used < Math.ceil(budget * Math.min(1, (doneToday() + 1) / goal()));
   return { budget, used, acc, queued, reason, ok: !reason && pace, okAnyPace: !reason };
 }
@@ -688,9 +692,9 @@ $("wl-search").addEventListener("input", (e) => { wl.q = e.target.value; renderW
 // ---------- ui ----------
 
 function show(id) {
-  for (const s of ["setup", "loading", "home", "trainer", "done", "library", "reader", "words", "stats"]) $(s).hidden = s !== id;
+  for (const s of ["setup", "loading", "home", "trainer", "done", "library", "reader", "words", "stats", "system"]) $(s).hidden = s !== id;
   if (id !== "reader") $("sheet").hidden = true;
-  document.querySelector(".stages").hidden = id === "reader" || id === "library" || id === "words" || id === "stats";
+  document.querySelector(".stages").hidden = id === "reader" || id === "library" || id === "words" || id === "stats" || id === "system";
 }
 function error(msg) { $("error").textContent = msg; $("error").hidden = !msg; }
 
@@ -703,6 +707,8 @@ $("words-btn").addEventListener("click", () => openWords());
 // stats: shown first so the charts can measure their width
 $("stats-btn").addEventListener("click", () => { show("stats"); renderStats(); scrollTo(0, 0); });
 $("st-home").addEventListener("click", () => home());
+$("system-btn").addEventListener("click", () => { renderSystem(); show("system"); scrollTo(0, 0); });
+$("sy-home").addEventListener("click", () => home());
 $("sync").addEventListener("click", () => syncNow());
 $("days").addEventListener("click", (e) => {
   const b = e.target.closest("[data-day]");
@@ -829,6 +835,14 @@ initStats({
   readingDays: () => readingDays(progress.reading, dayKey),
   readPages,
   pageWords: PAGE_WORDS,
+});
+
+initSystem({
+  words: () => words,
+  cards: () => cards,
+  playable,
+  maxNew,
+  rules: { RECENT, SESSION, FLIGHT, ACC_NONE, ACC_FULL, STRUGGLE, REVIEWS_FIRST },
 });
 
 if (LOCAL) window.__ft = { get target() { return target; }, get iter() { return iter; }, get card() { return cards.get(current); }, get sent() { return curSent; } };

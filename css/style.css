@@ -152,7 +152,7 @@ input, select { font: inherit; font-size: 16px; padding: 8px 10px; background: v
 
 /* home: two goals, two buttons */
 .read-count { font-size: 1.5rem; margin: 14px 0 8px; }
-.home-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.home-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .home-actions .practice-btn { padding-left: 6px; padding-right: 6px; min-width: 0; }
 
 /* stats */
@@ -266,3 +266,32 @@ button:disabled { opacity: .4; cursor: default; }
 .sheet-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: .9rem; }
 .sheet-foot .chip { font-size: .85rem; padding: 3px 9px; border: 1px solid var(--sec-border); border-radius: 99px; }
 .sheet-foot .chip i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+
+/* how it works (js/system.js): diagram like the Landscape Prototype's Pipeline window */
+#system { display: flex; flex-direction: column; gap: 14px; }
+#sy-svg { display: block; width: 100%; max-width: 520px; height: auto; margin: 6px auto 0; font-family: inherit; }
+.sy-node { cursor: pointer; color: var(--text-mid); outline: none; }
+.sy-box { fill: var(--bg); stroke: var(--btn-border); }
+.sy-node:hover .sy-box, .sy-node:focus-visible .sy-box { stroke: var(--text-dim); }
+.sy-node:focus-visible .sy-box { stroke: var(--text); stroke-width: 1.5; }
+.sy-kick { font-size: 8.5px; letter-spacing: .8px; fill: var(--text-dim); }
+.sy-title { font-size: 13px; font-weight: 600; fill: var(--text); }
+.sy-small { font-size: 9px; fill: var(--text-dim); }
+.sy-strong { fill: var(--text-mid); }
+.sy-count { font: 600 11px var(--mono); fill: var(--text); font-variant-numeric: tabular-nums; }
+.sy-step { fill: none; stroke: var(--st-learning); stroke-width: 1.2; }
+.sy-stepn { font: 600 10px var(--mono); fill: var(--text); }
+.sy-edge { fill: none; stroke: var(--text-dim); stroke-width: 1.2; stroke-linejoin: round; }
+.sy-edge.miss { stroke-dasharray: 4 3; }
+.sy-ah { fill: var(--text-dim); }
+.sy-elbl { font-size: 9px; fill: var(--text-dim); paint-order: stroke; stroke: var(--panel-bg); stroke-width: 3px; }
+.sy-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: start; }
+.sy-card { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px 14px; }
+.sy-card.flash { animation: syFlash 1.2s ease-out; }
+@keyframes syFlash { 0% { border-color: var(--text); } 100% { border-color: var(--panel-border); } }
+.sy-ct { font-weight: 600; font-size: .95rem; }
+.sy-cr { font-size: .78rem; color: var(--text-dim); margin: 2px 0 6px; }
+.sy-card ul, .sy-card ol { margin: 0; padding-left: 20px; font-size: .86rem; line-height: 1.5; }
+.sy-card li + li { margin-top: 4px; }
+.sy-card li::marker { color: var(--text-dim); }
+.sy-card code { font: .8rem var(--mono); }
