@@ -132,7 +132,7 @@ function cards(n) {
     { k: "run", t: "Daily run", r: "scheduled task, 13:00 and after logon or wake", li: [
       "Adds the reader words to the queue.",
       "Has Opus check and fix sentences you flagged with ⚑.",
-      "Writes sentences for new words (Sonnet). A word only enters practice once it has sentences.",
+      "Writes sentences for new words (Sonnet). A word from a book gets the book's own sentence as its first one (shortened to a full sentence of at most 20 words). A word only enters practice once it has sentences.",
       "Finds alternatives: other words that are also right in a gap.",
       "Keeps the book's translations and glossary 30 pages ahead.",
     ] },

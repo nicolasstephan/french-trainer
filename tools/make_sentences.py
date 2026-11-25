@@ -13,6 +13,7 @@ translation marked [[like this]] in "de", plus other meanings of the word.
     python tools/make_sentences.py --push          # commit + push sentences.json after every batch (scheduled job)
     python tools/make_sentences.py --alts --limit 400 --push   # alternatives for sentences made before "alt" existed
     python tools/make_sentences.py --flagged --push            # words flagged in the app (⚑): checked and fixed by Opus
+    python tools/make_sentences.py --from-book --push          # queued book words not seen yet: redo with the book sentence
 
 Flagged words: the app's ⚑ button writes progress.json "flags" (id -> {t, on, fr}). --flagged sends those words'
 sentences to a stronger model (--review-model, default Opus), which fixes or replaces wrong ones; the entry gets
@@ -26,6 +27,12 @@ Model: Sonnet by default (--model; same quality for this job at a fraction of Op
 one at a time with a pause in between (--batch, --jobs, --pause), so a run doesn't eat the whole usage allowance;
 a usage-limit error stops the run (the rest waits for the next one). Each finished batch is saved at once.
 Scheduled: tools/sentences_task.ps1 registers a daily Windows task that runs this with --push.
+
+Words from a book (added in the reader, or queued from the coming pages): one of the sentences is the book's own
+sentence, shortened to a complete sentence of at most BOOK_MAX words if it is longer. The place comes from the reader
+(progress.json reading.added: book, paragraph, sentence, form), else the first sentence of the book with a form of
+the word from your position on. The book's form can differ from the card's word (marchait for marcher): such a
+sentence carries its own "target"; it also gets "book" (id) and "p" (paragraph).
 
 Difficulty follows the stage: new/learning words get short, simple sentences built from
 vocabulary you already know well; familiar/known words get longer, more natural ones.
@@ -82,8 +89,17 @@ Reply with JSON only, no prose, shaped:
 {{"<id>": {{"lemma": "...", "pos": "...", "gender": null, "gloss": "...", "meanings": ["..."],
   "sentences": [{{"fr": "...", "de": "... [[...]] ...", "hint": "...", "alt": []}}]}}}}
 
-Words (id | target | level):
+{book_rule}Words (id | target | level):
 {words}
+"""
+
+BOOK_MAX = 20   # words; a longer book sentence is shortened to a full sentence
+BOOK_RULE = """Some words come with a sentence from the book the learner is reading ("book:"). For those, sentence 1 IS that
+sentence: keep the book's wording; if it has more than {max} words, shorten it to ONE complete, grammatical sentence of
+at most {max} words by cutting clauses or side parts (no paraphrase, no new words, keep tense and names), so that it
+still contains the book form of the word exactly and the context still points to it. Give that sentence
+"target": the book form exactly as it appears in it. Translate it into German like the others. The other sentences
+are your own, with the target as given.
 """
 
 
@@ -126,11 +142,16 @@ def word_re(word):
 
 def check(word, entry):
     """Keep sentences that contain the target as a whole word."""
-    pat = word_re(word)
-    entry["sentences"] = [s for s in entry.get("sentences", [])
-                          if pat.search(s.get("fr", "")) and 1 <= s.get("de", "").count("[[") <= 3]
+    keep = []
+    for s in entry.get("sentences", []):
+        t = str(s.pop("target", None) or "").strip()
+        if t and t.lower() != word.lower():
+            s["target"] = t   # a book sentence with the word in another form
+        if word_re(t or word).search(s.get("fr", "")) and 1 <= s.get("de", "").count("[[") <= 3:
+            keep.append(s)
+    entry["sentences"] = keep
     for s in entry["sentences"]:
-        s["alt"] = clean_alts(word, s.get("alt"))
+        s["alt"] = clean_alts(s.get("target") or word, s.get("alt"))
     entry["v"] = VERSION
     entry["alts"] = 1
     return entry
@@ -167,12 +188,13 @@ one most carefully:
 - Entry level: lemma, pos (noun/verb/adj/adv/pron/prep/conj/det/other), gender for nouns (m/f), gloss (direct German
   for the target as used), meanings (2-5 other common German meanings of the lemma).
 Fix what is wrong; replace a sentence that cannot be fixed with a new one at the same level. Keep correct sentences
-unchanged. Keep the number of sentences.
+unchanged. Keep the number of sentences. A sentence with "target" is from a book and has the word in that form: keep
+"target" (and the form in the sentence) unless you replace the sentence.
 "review": one short German sentence saying what was wrong and what you changed ("nichts falsch" if nothing).
 
 Reply with JSON only, no prose, shaped:
 {{"<id>": {{"lemma": "...", "pos": "...", "gender": null, "gloss": "...", "meanings": ["..."],
-  "sentences": [{{"fr": "...", "de": "... [[...]] ...", "hint": "...", "alt": []}}], "review": "..."}}}}
+  "sentences": [{{"fr": "...", "de": "... [[...]] ...", "hint": "...", "alt": [], "target": "(only if given)"}}], "review": "..."}}}}
 
 Words:
 {words}
@@ -194,7 +216,7 @@ def review_flagged(args, data, out, out_path):
         for i, f in batch:
             e = out[i]
             sents = "\n".join(f"  {'FLAGGED ' if s['fr'] == f.get('fr') else ''}{k + 1}. "
-                              + json.dumps({x: s.get(x) for x in ("fr", "de", "hint", "alt")}, ensure_ascii=False)
+                              + json.dumps({x: s.get(x) for x in ("fr", "de", "hint", "alt", "target") if s.get(x) is not None}, ensure_ascii=False)
                               for k, s in enumerate(e["sentences"]))
             head = {x: e.get(x) for x in ("lemma", "pos", "gender", "gloss", "meanings")}
             blocks.append(f"{i} | target: {e['word']} | {json.dumps(head, ensure_ascii=False)}\n{sents}")
@@ -222,6 +244,10 @@ def review_flagged(args, data, out, out_path):
             entry["review"] = note
             # which sentence was flagged: the app shows that one (in its new version) with the note
             entry["review_idx"] = next((k for k, s in enumerate(old["sentences"]) if s["fr"] == f.get("fr")), 0)
+            for s in entry["sentences"]:   # a kept book sentence keeps its source
+                o = next((x for x in old["sentences"] if x.get("book") and x.get("target") == s.get("target")), None)
+                if o and s.get("target"):
+                    s["book"], s["p"] = o["book"], o.get("p")
             changed = [s["fr"] for s in entry["sentences"]] != [s["fr"] for s in old["sentences"]]
             out[i] = entry
             got += 1
@@ -230,6 +256,93 @@ def review_flagged(args, data, out, out_path):
         print(f"review batch {n}/{len(batches)}: {got}/{len(batch)} words reviewed", flush=True)
         if args.push and got:
             push(data, f"Sentences: {got} flagged words reviewed")
+
+
+def find_book_sentences(data, todo):
+    """id -> {book, p, text, form} for queued words that come from a book: the sentence where you tapped the word
+    (reader), else the first sentence with a form of it from your reading position on (then before it)."""
+    import import_book as ib
+    pp = data / "progress.json"
+    reading = (json.loads(pp.read_text(encoding="utf-8")).get("reading") or {}) if pp.exists() else {}
+    added = reading.get("added") or {}
+    rb = reading.get("books") or {}
+    books, glosses, lex = {}, {}, []
+
+    def book(bid):
+        if bid and bid not in books:
+            f = data / "books" / f"{bid}.json"
+            books[bid] = json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
+            gf = data / "books" / f"{bid}.gloss.json"
+            glosses[bid] = json.loads(gf.read_text(encoding="utf-8")) if gf.exists() else {}
+        return books.get(bid)
+
+    def lexique_forms():
+        if not lex:
+            try:
+                import add_words
+                lex.append(add_words.lexique(data)[0])
+            except (SystemExit, Exception):
+                lex.append({})
+        return lex[0]
+
+    out = {}
+    for w in todo:
+        src = w.get("source") or ""
+        if not (src == "tapped" or src.startswith("book:")):
+            continue
+        lem = ib.key(w.get("lemma") or w["word"])
+        mine = [(k, v) for k, v in added.items() if k == lem or ib.key(v[1] or k) == lem]
+        # 1. the sentence where you tapped it in the reader
+        hit = next((v for k, v in mine if len(v) >= 6 and v[3] is not None), None)
+        if hit and book(hit[2]) and hit[3] < len(books[hit[2]]["paras"]):
+            text = books[hit[2]]["paras"][hit[3]]
+            spans = ib.sentences(text)
+            if hit[4] < len(spans):
+                sent = text[spans[hit[4]][0]:spans[hit[4]][1]].strip()
+                if word_re(hit[5]).search(sent):
+                    out[w["id"]] = {"book": hit[2], "p": hit[3], "text": sent, "form": hit[5]}
+                    continue
+        # 2. search the book it came from (else the one read last), from your position on, then before it
+        bid = src[5:] if src.startswith("book:") else next((v[2] for k, v in mine if len(v) > 2 and v[2]), "")
+        bid = bid or max(rb, key=lambda b: rb[b].get("at", 0), default="")
+        bk = book(bid)
+        if not bk:
+            continue
+        gl, pos = glosses[bid], (rb.get(bid) or {}).get("pos", 0)
+
+        def is_form(f):
+            k = ib.key(f)
+            if f[0].isupper():
+                return False   # names (le Grand Gobelin) and sentence starts
+            if k == lem:
+                return True
+            if len(k) < 3 or k in ib.CORE:
+                return False   # t (a-t-il), function words
+            g = gl.get(k)
+            if g and g[0]:
+                return ib.key(g[0]) == lem
+            return any(ib.key(l) == lem for l, _, _ in lexique_forms().get(k, []))
+
+        cands = []
+        for p in list(range(pos, len(bk["paras"]))) + list(range(min(pos, len(bk["paras"])) - 1, -1, -1)):
+            text = bk["paras"][p]
+            for a, b in ib.tokens(text):
+                if is_form(text[a:b]):
+                    s, e = next(((s, e) for s, e in ib.sentences(text) if a < e), (0, len(text)))
+                    sent = text[s:e].strip()
+                    if word_re(text[a:b]).search(sent):
+                        cands.append({"book": bid, "p": p, "text": sent, "form": text[a:b]})
+                    break
+            if len(cands) >= 8:
+                break
+        # a real sentence (capital or quote at the start, end mark at the end; not a verse or a bit of dialogue),
+        # the first short enough to keep whole, else the shortest of those (the model shortens it)
+        whole = [c for c in cands if re.match(r"[«—–\-\"“]?\s*[A-ZÀ-Ý]", c["text"]) and re.search(r"[.!?…][»”\"]?$", c["text"])
+                 and len(ib.words_of(c["text"])) >= 5] or cands
+        short = [c for c in whole if len(ib.words_of(c["text"])) <= BOOK_MAX]
+        if whole:
+            out[w["id"]] = short[0] if short else min(whole, key=lambda c: len(ib.words_of(c["text"])))
+    return out
 
 
 def gapped(fr, word):
@@ -248,7 +361,7 @@ def backfill_alts(args, data, out, out_path):
     for n, batch in enumerate(batches, 1):
         if n > 1 and args.pause:
             time.sleep(args.pause)
-        lines = "\n".join(f"{i} | {e['word']} | {k + 1} | {s.get('hint') or e.get('gloss', '')} | {gapped(s['fr'], e['word'])}"
+        lines = "\n".join(f"{i} | {e['word']} | {k + 1} | {s.get('hint') or e.get('gloss', '')} | {gapped(s['fr'], s.get('target') or e['word'])}"
                           for i, e in batch for k, s in enumerate(e["sentences"]))
         try:
             res = ask_claude(ALT_PROMPT.format(lines=lines), args.model)
@@ -264,7 +377,7 @@ def backfill_alts(args, data, out, out_path):
             if not isinstance(r, list):
                 continue
             for k, s in enumerate(e["sentences"]):
-                s["alt"] = clean_alts(e["word"], r[k] if k < len(r) else [])
+                s["alt"] = clean_alts(s.get("target") or e["word"], r[k] if k < len(r) else [])
                 with_alt += bool(s["alt"])
             e["alts"] = 1
             got += 1
@@ -301,6 +414,8 @@ def main():
     ap.add_argument("--alts", action="store_true", help="only add alternatives (alt) to existing sentences")
     ap.add_argument("--flagged", action="store_true", help="only review the words flagged in the app (progress.json)")
     ap.add_argument("--review-model", default=REVIEW_MODEL)
+    ap.add_argument("--from-book", action="store_true",
+                    help="redo queued book/reader words you have not seen yet that have no book sentence")
     args = ap.parse_args()
     data = Path(args.data)
     words = json.loads((data / "words.json").read_text(encoding="utf-8"))["words"]
@@ -312,6 +427,19 @@ def main():
     for w in words + extra:
         if w["word"] in redo:
             out.pop(w["id"], None)
+    force = set()
+    if args.from_book:
+        pp = data / "progress.json"
+        log = (json.loads(pp.read_text(encoding="utf-8")).get("log") or {}) if pp.exists() else {}
+        src = lambda w: w.get("source") or ""
+        old_book = [w for w in extra if (src(w) == "tapped" or src(w).startswith("book:")) and not log.get(w["id"])
+                    and out.get(w["id"]) and not any(x.get("book") for x in out[w["id"]]["sentences"])]
+        if args.limit:
+            old_book = old_book[:args.limit]
+        print(f"from book: redoing {len(old_book)} queued words", flush=True)
+        force = {w["id"] for w in old_book}   # the old sentences stay until the new ones are in
+        extra = old_book
+        args.extra = True
     if args.alts:
         backfill_alts(args, data, out, out_path)
         return
@@ -320,7 +448,7 @@ def main():
         return
 
     known = [w["word"] for w in words if w["stage"] == "known" and w["first_try_rate"] >= 0.6]
-    todo = [w for w in (extra if args.extra else words + extra) if not is_current(out.get(w["id"]))]
+    todo = [w for w in (extra if args.extra else words + extra) if not is_current(out.get(w["id"])) or w["id"] in force]
     # words that had sentences in an older format (English) come first, so the app never goes back to fewer cards
     old = {i for i, e in out.items() if not is_current(e)}
     # hardest first: they need sentences soonest; within a stage the ones Lingvist had due first
@@ -332,6 +460,9 @@ def main():
         todo = todo[:args.limit]
     print(f"{len(todo)} words to do, {len(out)} done")
 
+    book_sents = find_book_sentences(data, todo)
+    if book_sents:
+        print(f"{len(book_sents)} words get a sentence from the book", flush=True)
     batches = [todo[i:i + args.batch] for i in range(0, len(todo), args.batch)]
 
     stop = threading.Event()   # set on a usage-limit error: the remaining batches wait for the next run
@@ -341,8 +472,14 @@ def main():
             time.sleep(args.pause)
         if stop.is_set():
             raise RuntimeError("skipped (usage limit)")
-        lines = "\n".join(f"{w['id']} | {w['word']} | {LEVEL[w['stage']]}" for w in batch)
-        prompt = PROMPT.format(n=PER_WORD, known=", ".join(random.sample(known, min(150, len(known)))), words=lines)
+        def line(w):
+            b = book_sents.get(w["id"])
+            return f"{w['id']} | {w['word']} | {LEVEL[w['stage']]}" + (
+                f' | book: "{b["text"]}" (book form: {b["form"]})' if b else "")
+        lines = "\n".join(line(w) for w in batch)
+        rule = BOOK_RULE.format(max=BOOK_MAX) if any(w["id"] in book_sents for w in batch) else ""
+        prompt = PROMPT.format(n=PER_WORD, known=", ".join(random.sample(known, min(150, len(known)))), words=lines,
+                               book_rule=rule)
         return ask_claude(prompt, args.model)
 
     t0, failed = time.time(), 0
@@ -364,6 +501,11 @@ def main():
             for w in batch:
                 if w["id"] in res:
                     entry = check(w["word"], res[w["id"]])
+                    b = book_sents.get(w["id"])
+                    if b:   # mark the book's sentence: the one with the book form (or the word, if that is the form)
+                        s0 = next((s for s in entry["sentences"] if (s.get("target") or w["word"]) == b["form"]), None)
+                        if s0:
+                            s0["book"], s0["p"] = b["book"], b["p"]
                     if entry["sentences"]:
                         entry["word"] = w["word"]
                         out[w["id"]] = entry

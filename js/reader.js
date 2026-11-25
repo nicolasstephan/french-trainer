@@ -280,7 +280,8 @@ function onTap(e) {
   reading.looked[k] = [(l?.[0] ?? 0) + 1, nowS()];
   w.classList.add("looked");
   const lemma = g && g[0] && key(g[0]) !== k ? g[0] : "";
-  sheetWord = { k, lemma: g?.[0] || form, name: g?.[1] === "name" || /^[IVXLCDM]+$/.test(form) };   // names, chapter numbers: no card
+  // where it was tapped (paragraph, sentence, form): the new card gets that book sentence as one of its sentences
+  sheetWord = { k, lemma: g?.[0] || form, name: g?.[1] === "name" || /^[IVXLCDM]+$/.test(form), p, i: sentence.i, form };   // names, chapter numbers: no card
   // the 2nd lookup adds the word to the cards
   if (!own && !sheetWord.name && reading.looked[k][0] >= ADD_AFTER && !isAdded(k)) addWord(true);
   ctx.save();
@@ -316,7 +317,7 @@ function renderOwn(own) {
 
 function addWord(auto = false) {
   const reading = ctx.getReading();
-  (reading.added ??= {})[sheetWord.k] = [nowS(), sheetWord.lemma, book?.id ?? ""];
+  (reading.added ??= {})[sheetWord.k] = [nowS(), sheetWord.lemma, book?.id ?? "", sheetWord.p, sheetWord.i, sheetWord.form];
   ctx.save();
   renderOwn(null);
   toast(auto ? "Looked up twice: added to your cards" : "Added to your cards");

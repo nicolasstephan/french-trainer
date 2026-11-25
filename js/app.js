@@ -391,7 +391,8 @@ function renderCard() {
   // just checked by Opus after a flag: the flagged sentence (in its new version) with the note
   const rv = reviewPending(current);
   const sent = s.sentences[rv && s.review_idx < s.sentences.length ? s.review_idx : c.reps % s.sentences.length];
-  const m = wordRe(w.word).exec(sent.fr);
+  // a sentence taken from a book can have the word in another form (marchait for marcher): its own "target"
+  const m = wordRe(sent.target || w.word).exec(sent.fr);
   const before = m ? sent.fr.slice(0, m.index) : sent.fr + " ", after = m ? sent.fr.slice(m.index + m[0].length) : "";
   target = m ? m[0] : w.word;
   curSent = sent;
